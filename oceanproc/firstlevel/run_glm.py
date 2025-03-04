@@ -484,19 +484,20 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     masked_func_data = func_data.copy()[mask, :]
     masked_design_matrix = design_matrix.copy()[mask, :]
 
-    ss = StandardScaler()
+    func_ss = StandardScaler()
+    design_ss = StandardScaler()
 
     # standardize the masked data
-    masked_func_data = ss.fit_transform(masked_func_data)
-    masked_design_matrix = ss.fit_transform(masked_design_matrix)
+    masked_func_data = func_ss.fit_transform(masked_func_data)
+    masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
     # comput beta values
     inv_mat = np.linalg.pinv(masked_design_matrix)
     beta_data = np.dot(inv_mat, masked_func_data)
 
     # standardize the unmasked data
-    func_data = ss.fit_transform(func_data)
-    design_matrix = ss.fit_transform(design_matrix)
+    func_data = func_ss.transform(func_data)
+    design_matrix = design_ss.transform(design_matrix)
 
     # compute the residuals with unmasked data
     est_values = np.dot(design_matrix, beta_data)
@@ -713,12 +714,13 @@ def main():
         mask_list = []
 
         # For each set of run files, create the design matrix and finalize the BOLD data before the session-task level GLM
-        for i, run_map in enumerate(file_map_list):
+        for map_dex, run_map in enumerate(file_map_list):
             log_linebreak()
             logger.info(f"processing bold file: {run_map['bold']}")
             logger.info(f" loading in BOLD data")
             run_file_base = file_name_base
             run_info = len(str(run_map['bold']).split('run-')) > 1
+            run_num = map_dex + 1
             if run_info:
                 run_num = int(run_map['bold'].name.split('run-')[-1].split('_')[0])
                 run_file_base = f"{file_name_base}_run-{run_num:02d}"
