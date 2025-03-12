@@ -526,6 +526,8 @@ def main():
                         Default is the derivatives directory containing preprocessed outputs.""")
     session_arguments.add_argument("--export_args", "-ea", type=Path,
                         help="Path to a file to save the current arguments.")
+    session_arguments.add_argument("--force_overwrite", action="store_true",
+                        help="Use this flag to force oceanfla to proceed when conflicting task outputs are present in the output directory")
     session_arguments.add_argument("--debug", action="store_true",
                         help="Use this flag to save intermediate outputs for a chance to debug inputs")
     
@@ -538,7 +540,7 @@ def main():
     config_arguments.add_argument("--derivs_dir", "-d", type=Path, required=True,
                         help="Path to the BIDS formatted derivatives directory containing processed outputs.")
     config_arguments.add_argument("--preproc_subfolder", "-pd", type=str, default="fmriprep",
-                        help="Name of the subfolder in the derivatives directory containing the preprocessed bold data")
+                        help="Name of the subfolder in the derivatives directory containing the preprocessed bold data. Default is 'fmriprep'")
     config_arguments.add_argument("--raw_bids", "-r", type=Path, required=True,
                         help="Path to the BIDS formatted raw data directory for this dataset.")
     config_arguments.add_argument("--derivs_subfolder", "-ds", default="first_level",
@@ -643,18 +645,23 @@ def main():
         args.output_dir = args.derivs_dir / f"{args.derivs_subfolder}/sub-{args.subject}/ses-{args.session}/func"
 
     ################# check if previous outputs exist in the output directory #################
-    if args.output_dir.exists() and len(os.listdir(args.output_dir)) != 0:
-        want_to_delete = prompt_user_continue(dedent("""
-            The output directory for this subject and session is not empty. 
-            Would you like to delete its contents and start fresh? If not, the program will exit now.
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    unmodified_output_dir_contents = set(args.output_dir.iterdir())
+    old_outputs = set(args.output_dir.glob(f"{file_name_base}*"))
+    if not args.force_overwrite and len(old_outputs) != 0:
+        want_to_delete = prompt_user_continue(dedent(f"""
+            The output directory for this subject and session contain derivative files for this task: {args.task}
+            Would you like to delete these files and start fresh? If not, the program will exit now.
             """))
         if want_to_delete:
-            logger.info("removing the old output directory and its contents")
-            shutil.rmtree(args.output_dir)
+            for old_file in old_outputs:
+                logger.info(f"deleting file: {old_file.resolve()}")
+                os.remove(old_file)
+                unmodified_output_dir_contents.discard(old_file)
         else: 
             exit_program_early("output directory will not be modified")
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    ################# set up the logging #################
     log_dir = args.output_dir.parent / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -799,15 +806,18 @@ def main():
             noise_df_filename = args.output_dir/f"{run_file_base}_desc-model-{model_type}{user_desc}_nuisance.csv"
             logger.info(f" saving nuisance matrix to file: {noise_df_filename}")
             noise_df.to_csv(noise_df_filename)
+            unmodified_output_dir_contents.discard(noise_df_filename)
 
             events_long_filename = args.output_dir/f"{run_file_base}_desc{user_desc}-events_long.csv"
             logger.debug(f" saving events long to file: {events_long_filename}")
             events_long.to_csv(events_long_filename)
+            unmodified_output_dir_contents.discard(events_long_filename)
 
             if flags.debug:
                 events_df_filename = args.output_dir/f"{run_file_base}_desc-model-{model_type}{user_desc}-events_matrix.csv"
                 logger.debug(f" saving events matrix to file: {events_df_filename}")
                 events_df.to_csv(events_df_filename)
+                unmodified_output_dir_contents.discard(events_df_filename)
 
 
             ################# detrend the BOLD data if specifed #################
@@ -831,6 +841,7 @@ def main():
                         cleanimg,
                         cleaned_filename
                     )
+                    unmodified_output_dir_contents.discard(cleaned_filename)
             
 
             ################# nuisance regression if specified #################
@@ -867,6 +878,7 @@ def main():
                         nrimg,
                         nr_filename
                     )
+                    unmodified_output_dir_contents.discard(nr_filename)
 
                     # save out the nuisance betas
                     for i, noise_col in enumerate(noise_df.columns):
@@ -882,6 +894,7 @@ def main():
                             beta_img,
                             beta_filename
                         )
+                        unmodified_output_dir_contents.discard(beta_filename)
 
 
             ################# filter the data if specified #################
@@ -910,7 +923,7 @@ def main():
                         cleanimg,
                         filtered_filename
                     )
-            
+                    unmodified_output_dir_contents.discard(filtered_filename)
 
             ################# apppend the run-wise data to the session list #################
             assert func_data.shape[0] == len(noise_df), "The functional data and the nuisance matrix have a different number of timepoints"
@@ -953,9 +966,11 @@ def main():
         final_design_unmasked_filename = args.output_dir/f"{file_name_base}_desc-model-{model_type}{user_desc}-design_unmasked.csv"
         logger.info(f"saving the final unmasked design matrix to file: {final_design_unmasked_filename}")
         final_design_unmasked.to_csv(final_design_unmasked_filename)
+        unmodified_output_dir_contents.discard(final_design_unmasked_filename)
         final_design_masked_filename = args.output_dir/f"{file_name_base}_desc-model-{model_type}{user_desc}-design_final.csv"
         logger.info(f"saving the final design matrix to file: {final_design_masked_filename}")
         final_design_masked.to_csv(final_design_masked_filename)
+        unmodified_output_dir_contents.discard(final_design_masked_filename)
 
 
         ################# run the final GLM #################
@@ -987,6 +1002,7 @@ def main():
                     beta_img,
                     beta_filename
                 )
+                unmodified_output_dir_contents.discard(beta_filename)
 
         if args.fir:
             for condition in fir_betas_to_combine:
@@ -1006,6 +1022,7 @@ def main():
                         beta_img,
                         beta_filename
                     )
+                    unmodified_output_dir_contents.discard(beta_filename)
 
                 beta_img, img_suffix = create_image(
                     data=beta_frames,
@@ -1019,6 +1036,7 @@ def main():
                     beta_img,
                     beta_filename
                 )
+                unmodified_output_dir_contents.discard(beta_filename)
 
         ################# save out the nuisance betas and the residuals #################
         if flags.debug:
@@ -1037,6 +1055,7 @@ def main():
                     beta_img,
                     beta_filename
                 )
+                unmodified_output_dir_contents.discard(beta_filename)
 
             # save out residuals of GLM
             resid_img, img_suffix = create_image(
@@ -1051,6 +1070,15 @@ def main():
                 resid_img,
                 resid_filename
             )
+            unmodified_output_dir_contents.discard(resid_filename)
+
+        ################# report which files were left unmodified #################
+        if len(unmodified_output_dir_contents) > 0:
+            logger.info("the following files were not modified during this run of oceanfla:")
+            for unchanged_file in sorted(unmodified_output_dir_contents):
+                logger.info(f"\t{unchanged_file.resolve()}")
+
+        log_linebreak()
 
     except Exception as e:
         logger.exception(e, stack_info=True)
