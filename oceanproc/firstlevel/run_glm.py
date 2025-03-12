@@ -694,13 +694,15 @@ def main():
 
             if args.events_long:
                 events_long_search_path = f"{bold_base}*_desc*events_long.csv"
+                glob_path = args.raw_bids / f"**/{events_long_search_path}"
                 events_long_files = list(args.events_long.glob(f"**/{events_long_search_path}"))
-                assert len(events_long_files) == 1, f"Found more or less than one events long file for bold run: {str(bold_path)} search path: {events_long_search_path} len: {len(events_long_files)}"
+                assert len(events_long_files) == 1, f"Found more or less than one events long file for bold run: {str(bold_path)} search path: {str(glob_path)} len: {len(events_long_files)}"
                 file_map["events"] = events_long_files[0]
             else:
                 event_search_path = f"{bold_base}*_events.tsv"
+                glob_path = args.raw_bids / f"**/{event_search_path}"
                 event_files = list(args.raw_bids.glob("**/" + event_search_path))
-                assert len(event_files) == 1, f"Found more or less than one event file for bold run: {str(bold_path)} search path: {event_search_path} len: {len(event_files)}"
+                assert len(event_files) == 1, f"Found more or less than one event file for bold run: {str(bold_path)} search path: {str(glob_path)} len: {len(event_files)}"
                 file_map["events"] = event_files[0]
 
             file_map_list.append(file_map)
