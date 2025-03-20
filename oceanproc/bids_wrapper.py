@@ -44,13 +44,15 @@ def remove_unusable_runs(xml_file:Path, bids_data_path:Path, subject:str):
         exit_program_early(f"Error parsing the xml file provided. Found none or more than one scan groups")
     
     scans = scan_element_list[0]
-    quality_pairs = {int(s.get("ID")) : s.find(f"{prefix}quality").text
+    quality_pairs = {s.get("UID") : s.find(f"{prefix}quality").text
                      for s in scans}
-    
+    uid_to_scan_id = {s.get("UID") : s.get("ID")
+                     for s in scans}
+
     if len(quality_pairs) == 0:
         exit_program_early("Could not find scan quality information in the given xml file.") 
 
-    logger.debug(f"scan quality information: {quality_pairs}")
+    logger.debug(f"scan quality information: {({uid_to_scan_id[uid]:q for uid, q in quality_pairs.items()})}")
     
     json_paths = sorted(list(p for p in (bids_data_path / f"sub-{subject}/").rglob("*.json"))) # if re.search(json_re, p.as_posix()) != None)
     nii_paths = sorted(list(p for p in (bids_data_path / f"sub-{subject}/").rglob("*.nii.gz"))) # if re.search(json_re, p.as_posix()) != None)
@@ -63,8 +65,8 @@ def remove_unusable_runs(xml_file:Path, bids_data_path:Path, subject:str):
  
     for p_json, p_nii in zip(json_paths, nii_paths):
         j = json.load(p_json.open()) 
-        if quality_pairs[j["SeriesNumber"]] == "unusable":
-            logger.info(f"  Removing series {j['SeriesNumber']}: NIFTI:{p_nii}, JSON:{p_json}")
+        if quality_pairs[j["SeriesInstanceUID"]] == "unusable":
+            logger.info(f"  Removing series {uid_to_scan_id[j['SeriesInstanceUID']]}: NIFTI:{p_nii}, JSON:{p_json}")
             os.remove(p_json) 
             os.remove(p_nii) 
 
@@ -126,9 +128,9 @@ def run_dcm2bids(subject:str,
         else:
             return
         
-    nifti_path = None    
+    nifti_path = None
+    clean_up(quiet=True)    
     if not nifti:
-        clean_up(quiet=True)
         run_dcm2niix(source_dir=source_dir, 
                      tmp_nifti_dir=tmp_path)
         nifti_path = tmp_path
@@ -182,11 +184,11 @@ def run_dcm2bids(subject:str,
                     raise RuntimeError("'dcm2bids' has ended with a non-zero exit code.")
                 
             # Clean up NORDIC files
-            if not flags.debug:
-                separate_nordic_files = glob(f"{str(bids_output_dir)}/sub-{subject}/ses-{session}/func/*_part-*")
-                logger.debug(f"removing the old nordic files that are not needed after mag-phase combination :\n  {separate_nordic_files}")
-                for f in separate_nordic_files:
-                    os.remove(f)
+            separate_nordic_files = glob(f"{str(bids_output_dir)}/sub-{subject}/ses-{session}/func/*_part-*")
+            logger.debug(f"removing the old nordic files that are not needed after mag-phase combination :")
+            for f in separate_nordic_files:
+                logger.debug(f"deleting file: {f}")
+                os.remove(f)
 
     except RuntimeError or subprocess.CalledProcessError as e:
         prepare_subprocess_logging(logger, stop=True)
