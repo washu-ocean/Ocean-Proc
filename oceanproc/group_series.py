@@ -14,6 +14,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 @debug_logging
 def get_locals_from_xml(xml_path: Path) -> set:
     """
@@ -36,9 +37,7 @@ def get_locals_from_xml(xml_path: Path) -> set:
     localizers = set()
     for s in scans:
         if re.match(r"Localizer.*", s.get("type")) and s.find(f'{prefix}quality').text == "usable":
-            time_str = f'{s.find(f"{prefix}start_date").text} {s.find(f"{prefix}startTime").text}'
-            acq_time = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
-            # localizers.add(int(s.get("ID")))
+            acq_time = datetime.strptime(s.find(f"{prefix}startTime").text, "%H:%M:%S")
             localizers.add(acq_time)
     return sorted(localizers)
 
@@ -66,18 +65,17 @@ def get_func_from_bids(bids_path: Path,
         jd = None
         with open(jf, "r") as j:
             jd = json.load(j)
-        uid = jd["SeriesInstanceUID"]
+        series_id = jd["SeriesNumber"]
         jd["bidsname"] = f"{bids_path.name}/func/{jf.with_suffix('.nii.gz').name}"
-        jd["filename"] = str(jf)
-        acq_time = datetime.strptime(jd["AcquisitionDateTime"], "%Y-%m-%dT%H:%M:%S.%f")
-        json_dict[uid].append(jd)
+        acq_time = datetime.strptime(jd["AcquisitionTime"], "%H:%M:%S.%f")
+        json_dict[acq_time].append(jd)
         for i, dt in enumerate(localizers):
             if i < len(localizers)-1:
                 if acq_time > dt and acq_time < localizers[i+1]:
-                    groupings[i]["task"].add((uid, acq_time))
+                    groupings[i]["task"].add((series_id, acq_time))
                     break
             else:
-                groupings[i]["task"].add((uid, acq_time))
+                groupings[i]["task"].add((series_id, acq_time))
 
 
 # Read in the json for the field maps from the bids dir
@@ -104,18 +102,19 @@ def get_fmap_from_bids(bids_path: Path,
         jd = None
         with open(jf, "r") as j:
             jd = json.load(j)
-        uid = jd["SeriesInstanceUID"]
+        series_id = jd["SeriesNumber"]
         jd["filename"] = str(jf)
-        acq_time = datetime.strptime(jd["AcquisitionDateTime"], "%Y-%m-%dT%H:%M:%S.%f")
-        json_dict[uid].append(jd)
+        acq_time = datetime.strptime(jd["AcquisitionTime"], "%H:%M:%S.%f")
+        json_dict[acq_time].append(jd)
         direction = "fmapAP" if jd["PhaseEncodingDirection"] == "j-" else "fmapPA"
         for i, dt in enumerate(localizers):
             if i < len(localizers)-1:
                 if acq_time > dt and acq_time < localizers[i+1]:
-                    groupings[i][direction].add((uid, acq_time))
+                    groupings[i][direction].add((series_id, acq_time))
                     break
             else:
-                groupings[i][direction].add((uid, acq_time))
+                groupings[i][direction].add((series_id, acq_time))
+
 
 @debug_logging
 def map_fmap_to_func(xml_path: Path,
@@ -149,39 +148,43 @@ def map_fmap_to_func(xml_path: Path,
                        localizers=locals_series, 
                        json_dict=series_json, 
                        groupings=groups)
-    logger.info(f"Localizer groups: {groups}") 
+    logger.info(f"Localizer groups: ") 
+    for group_num, g in enumerate(groups):
+        logger.info(f"\tgroup : {group_num}")
+        for k, v in g.items():
+            logger.info(f"\t\t{k}: {v}")
 
     for group in groups:
         if len(group["fmapAP"]) != len(group["fmapPA"]):
             exit_program_early("Unequal number of AP and PA field maps.")
         fmap_pairs = tuple(zip(sorted(group["fmapAP"], key=lambda x: x[1]), sorted(group["fmapPA"], key=lambda x: x[1])))
         fmap_times = []
-        
+
         # get times for field maps
-        for i, ((ap_uid, ap_acq_time), (pa_uid, pa_acq_time)) in enumerate(fmap_pairs):
+        for i, ((ap_id, ap_acq_time), (pa_id, pa_acq_time)) in enumerate(fmap_pairs):
             times = sorted((ap_acq_time, pa_acq_time))
             fmap_times.append(times[0] + (abs(times[1] - times[0])/2))
         
         # pair task runs with field maps based on closest Acquisition Time
         map_pairings = {s:[] for s in fmap_pairs}
-        for (t_uid, t_acq_time) in group["task"]:
+        for (t_id, t_acq_time) in group["task"]:
             diff = list(map(lambda x: abs(x-t_acq_time), fmap_times))
             pairing = fmap_pairs[diff.index(min(diff))]
-            map_pairings[pairing].append(t_uid)
+            map_pairings[pairing].append(t_acq_time)
         
         # add the list of task run files that are paired with each field map in their json files
         pairing_strs = []
-        for (ap_tup, pa_tup), task_uids in map_pairings.items():
-            for fmap_uid, fmap_type in ((ap_tup[0], "ap"), (pa_tup[0],"pa")):
-                jd = series_json[fmap_uid][0]
+        for (ap_tup, pa_tup), task_acq_times in map_pairings.items():
+            for fmap_acq, fmap_type in ((ap_tup[1], "ap"), (pa_tup[1],"pa")):
+                jd = series_json[fmap_acq][0]
                 fmap_file = jd.pop("filename")
                 jd["IntendedFor"] = []
                 task_series = set()
-                for t_uid in task_uids:
-                    for echo in series_json[t_uid]:
+                for t_acq in task_acq_times:
+                    for echo in series_json[t_acq]:
                         jd["IntendedFor"].append(echo["bidsname"])
                         task_series.add(str(echo["SeriesNumber"]))
-                pairing_strs.append((f"{fmap_type}:{jd['SeriesNumber']}", f"\t{' '.join(task_series)}"))
+                pairing_strs.append((f"{fmap_type}:{jd['SeriesNumber']}", ' '.join(task_series)))
                 with open(fmap_file, "w") as out_file:
                     logger.debug(f"writing field map pairing information to file: {fmap_file}")
                     out_file.write(json.dumps(jd, indent=4))
@@ -190,8 +193,8 @@ def map_fmap_to_func(xml_path: Path,
         if len(pairing_strs) > 0:            
             logger.info(f"Field map pairings:")
             for ps in pairing_strs:
-                logger.info(ps[0])
-                logger.info(ps[1])
+                logger.info(f"{ps[0]} -->  {ps[1]}")
+
 
 def map_fmap_to_func_with_pairing_file(bids_dir_path: Path,
                                        pairing_json: Path):

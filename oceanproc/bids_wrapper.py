@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import os
 import re
+from datetime import datetime
 import shlex
 import shutil
 import subprocess
@@ -16,9 +17,11 @@ from .utils import exit_program_early, prompt_user_continue, prepare_subprocess_
 import logging
 
 logger = logging.getLogger(__name__)
-
+'''
+remove_unusable -> relate xml and json with protocol name and aqcuisition time (and series id?)
+'''
 @debug_logging
-def remove_unusable_runs(xml_file:Path, bids_data_path:Path, subject:str):
+def remove_unusable_runs(xml_file:Path, bids_data_path:Path, subject:str, session:str):
     """
     Will remove unusable scans from list of scans after dcm2bids has run.
 
@@ -28,6 +31,8 @@ def remove_unusable_runs(xml_file:Path, bids_data_path:Path, subject:str):
     :type bids_data_path: pathlib.Path
     :param subject: Subject ID used in BIDS-compliant data (for example, if 'sub-5000', subject is '5000').
     :type subject: str
+    :param session: Session ID used in BIDS-compliant data (for example, if 'ses-01', session is '01').
+    :type session: str
 
     """
     log_linebreak()
@@ -44,29 +49,38 @@ def remove_unusable_runs(xml_file:Path, bids_data_path:Path, subject:str):
         exit_program_early(f"Error parsing the xml file provided. Found none or more than one scan groups")
     
     scans = scan_element_list[0]
-    quality_pairs = {s.get("UID") : s.find(f"{prefix}quality").text
-                     for s in scans}
-    uid_to_scan_id = {s.get("UID") : s.get("ID")
-                     for s in scans}
+    quality_pairs = {}
+    for s in scans:
+        series_id = int(re.split(r'[-,;_.]', s.get("ID"))[0])
+        series_desc = s.find(f"{prefix}series_description").text
+        protocal_name = s.find(f"{prefix}protocolName").text
+        quality_info = s.find(f"{prefix}quality").text
+        s_key = (series_id, series_desc, protocal_name)
+        if s_key in quality_pairs and (quality_info=="unusable" or quality_pairs[s_key]=="unusable"):
+            exit_program_early(f"Found scans with identical series numbers and protocol names in the session xml file. Cannot accurately differentiate these scans {s_key}")
+        quality_pairs[s_key] = quality_info
 
     if len(quality_pairs) == 0:
         exit_program_early("Could not find scan quality information in the given xml file.") 
 
-    logger.debug(f"scan quality information: {({uid_to_scan_id[uid]:q for uid, q in quality_pairs.items()})}")
+    logger.info(f"scan quality information: ")
+    for k, v in quality_pairs.items():
+        logger.info(f"\t{k} -> {v}")
     
-    json_paths = sorted(list(p for p in (bids_data_path / f"sub-{subject}/").rglob("*.json"))) # if re.search(json_re, p.as_posix()) != None)
-    nii_paths = sorted(list(p for p in (bids_data_path / f"sub-{subject}/").rglob("*.nii.gz"))) # if re.search(json_re, p.as_posix()) != None)
+    json_paths = sorted(list(p for p in (bids_data_path / f"sub-{subject}/ses-{session}").rglob("*.json"))) 
 
-    if len(json_paths) == 0 or len(nii_paths) == 0:
-        exit_program_early("Could not find Nifti or JSON sidecar files in the bids directory.")
+    if len(json_paths) == 0:
+        exit_program_early("Could not find JSON sidecar files in the bids directory.")
 
-    if len(json_paths) != len(nii_paths):
-        exit_program_early("Unequal amount of NIFTI and JSON files found")
- 
-    for p_json, p_nii in zip(json_paths, nii_paths):
+    for p_json in json_paths:
+        p_nii = p_json.with_suffix(".nii.gz")
+        if not p_nii.exists():
+            exit_program_early(f"Could not find the NIFTI file that goes with the sidecar file: {p_json} ")
         j = json.load(p_json.open()) 
-        if quality_pairs[j["SeriesInstanceUID"]] == "unusable":
-            logger.info(f"  Removing series {uid_to_scan_id[j['SeriesInstanceUID']]}: NIFTI:{p_nii}, JSON:{p_json}")
+        j_series_id, j_series_desc, j_protocol_name = j["SeriesNumber"], j["SeriesDescription"], j["ProtocolName"]
+        j_key = (j_series_id, j_series_desc, j_protocol_name)
+        if quality_pairs[j_key] == "unusable":
+            logger.info(f"  Removing series {j_series_id} - {j_series_desc} - {j_protocol_name}: \n\t NIFTI:{p_nii}, JSON:{p_json}")
             os.remove(p_json) 
             os.remove(p_nii) 
 
@@ -74,11 +88,10 @@ def remove_unusable_runs(xml_file:Path, bids_data_path:Path, subject:str):
 @debug_logging
 def run_dcm2bids(subject:str, 
                  session:str,
-                 source_dir:Path, 
+                 nifti_dir:Path, 
                  bids_output_dir:Path, 
                  config_file:Path, 
-                 nordic_config:Path=None,
-                 nifti:bool=False):
+                 nordic_config:Path=None):
     """
     Run dcm2bids with a given set of parameters.
 
@@ -86,60 +99,59 @@ def run_dcm2bids(subject:str,
     :type subject: str
     :param session: Session name (ex. 'ses-01', session would be '01')
     :type session: str
-    :param source_dir: Path to 'sourcedata' directory (or wherever DICOM data is kept).
-    :type source_dir: pathlib.Path
+    :param nifti_dir: Path to the directory where NIFTI data for this session is kept.
+    :type nifti_dir: pathlib.Path
     :param bids_output_dir: Path to the bids directory to store the newly made NIFTI files
     :type bids_output_dir: pathlib.Path
     :param config_file: Path to dcm2bids config file, which maps raw sourcedata to BIDS-compliant counterpart
     :type config_file: pathlib.Path
     :param nordic_config: Path to second dcm2bids config file, needed for additional post processing that one BIDS config file can't handle.
     :type nordic_config: pathlib.Path
-    :param nifti: Specify that the soure directory contains NIFTI files instead of DICOM
-    :type nifti: bool
     :raise RuntimeError: If dcm2bids exits with a non-zero exit code.
     """
 
-    for p in [source_dir, bids_output_dir, config_file]:
-        if not p.exists():
-            exit_program_early(f"Path {str(p)} does not exist.")
+    # for p in [source_dir, bids_output_dir, config_file]:
+    #     if not p.exists():
+    #         exit_program_early(f"Path {str(p)} does not exist.")
 
     if shutil.which('dcm2bids') == None:
             exit_program_early("Cannot locate program 'dcm2bids', make sure it is in your PATH.")
     
-    tmp_path = bids_output_dir / f"tmp_dcm2bids/sub-{subject}_ses-{session}"
+    # tmp_path = bids_output_dir / f"tmp_dcm2bids/sub-{subject}_ses-{session}"
     
-    def clean_up(quiet=False):
-        try:
-            logger.debug(f"removing the temporary directory used by dcm2bids: {tmp_path}")
-            shutil.rmtree(tmp_path)
-        except Exception:
-            if not quiet:
-                logger.warning(f"There was a problem deleting the temporary directory at {tmp_path}")
+    # def clean_up(quiet=False):
+    #     try:
+    #         logger.debug(f"removing the temporary directory used by dcm2bids: {tmp_path}")
+    #         shutil.rmtree(tmp_path)
+    #     except Exception:
+    #         if not quiet:
+    #             logger.warning(f"There was a problem deleting the temporary directory at {tmp_path}")
     
-    if (path_that_exists := bids_output_dir/f"sub-{subject}/ses-{session}").exists():
-        ans = prompt_user_continue(dedent(f"""
-                                    A raw data bids path for this subject and session already exists. 
-                                    Would you like to delete its contents and rerun dcm2bids? If not,
-                                    dcm2bids will be skipped.
-                                          """))
-        if ans:
-            logger.debug("removing the old BIDS raw data directory and its contents")
-            shutil.rmtree(path_that_exists)
-        else:
-            return
+    # if (path_that_exists := bids_output_dir/f"sub-{subject}/ses-{session}").exists():
+    #     ans = prompt_user_continue(dedent(f"""
+    #                                 A raw data bids path for this subject and session already exists. 
+    #                                 Would you like to delete its contents and rerun dcm2bids? If not,
+    #                                 dcm2bids will be skipped.
+    #                                       """))
+    #     if ans:
+    #         logger.debug("removing the old BIDS raw data directory and its contents")
+    #         shutil.rmtree(path_that_exists)
+    #     else:
+    #         return
         
-    nifti_path = None
-    clean_up(quiet=True)    
-    if not nifti:
-        run_dcm2niix(source_dir=source_dir, 
-                     tmp_nifti_dir=tmp_path)
-        nifti_path = tmp_path
-    else:
-        nifti_path = source_dir
+    # nifti_path = None
+    # clean_up(quiet=True)    
+    # if not nifti:
+    #     run_dcm2niix(source_dir=source_dir, 
+    #                  tmp_nifti_dir=tmp_path)
+    #     nifti_path = tmp_path
+    # else:
+    #     nifti_path = source_dir
+
     helper_command = shlex.split(f"""{shutil.which('dcm2bids')} 
                                  --bids_validate 
                                  --skip_dcm2niix
-                                 -d {str(nifti_path)} 
+                                 -d {str(nifti_dir)} 
                                  -p {subject} 
                                  -s {session} 
                                  -c {str(config_file)} 
@@ -165,7 +177,7 @@ def run_dcm2bids(subject:str,
             nordic_run_command = shlex.split(f"""{shutil.which('dcm2bids')} 
                                             --bids_validate
                                             --skip_dcm2niix
-                                            -d {str(nifti_path)} 
+                                            -d {str(nifti_dir)} 
                                             -p {subject}
                                             -s {session}
                                             -c {str(nordic_config)}
@@ -193,9 +205,9 @@ def run_dcm2bids(subject:str,
     except RuntimeError or subprocess.CalledProcessError as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early("Problem running 'dcm2bids'.", None if flags.debug else clean_up)
-    if not flags.debug:
-        clean_up()
+        exit_program_early("Problem running 'dcm2bids'.")
+    # if not flags.debug:
+    #     clean_up()
 
 
 @debug_logging
@@ -288,17 +300,54 @@ def dicom_to_bids(subject:str,
     :type nifti: bool
     """
 
+    for p in [source_dir, bids_dir, bids_config]:
+        if not p.exists():
+            exit_program_early(f"Path {str(p)} does not exist.")
+
+    if (path_that_exists := bids_dir/f"sub-{subject}/ses-{session}").exists():
+            ans = prompt_user_continue(dedent(f"""
+                                        A raw data bids path for this subject and session already exists. 
+                                        Would you like to delete its contents and rerun dcm2bids? If not,
+                                        dcm2bids will be skipped.
+                                            """))
+            if ans:
+                logger.debug("removing the old BIDS raw data directory and its contents")
+                shutil.rmtree(path_that_exists)
+            else:
+                return
+            
+    tmp_path = bids_dir / f"tmp_dcm2bids/sub-{subject}_ses-{session}"
+    def clean_up(quiet=False):
+        try:
+            logger.debug(f"removing the temporary directory used by dcm2bids: {tmp_path}")
+            shutil.rmtree(tmp_path)
+        except Exception:
+            if not quiet:
+                logger.warning(f"There was a problem deleting the temporary directory at {tmp_path}")
+    
+    nifti_path = None
+    clean_up(quiet=True)    
+    if not nifti:
+        run_dcm2niix(source_dir=source_dir, 
+                     tmp_nifti_dir=tmp_path)
+        nifti_path = tmp_path
+    else:
+        nifti_path = source_dir
+    
+
     run_dcm2bids(subject=subject, 
                  session=session,
-                 source_dir=source_dir, 
+                 nifti_dir=nifti_path, 
                  bids_output_dir=bids_dir, 
                  config_file=bids_config, 
-                 nordic_config=nordic_config, 
-                 nifti=nifti)
+                 nordic_config=nordic_config)
     
-    remove_unusable_runs(xml_file=xml_path, 
-                         bids_data_path=bids_dir, 
-                         subject=subject)
+    if not flags.debug:
+        clean_up()
+        
+    # remove_unusable_runs(xml_file=xml_path, 
+    #                      bids_data_path=bids_dir, 
+    #                      subject=subject)
 
 
 if __name__ == "__main__":

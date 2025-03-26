@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 import logging
 import datetime
-from .bids_wrapper import dicom_to_bids
+from .bids_wrapper import dicom_to_bids, remove_unusable_runs
 from .group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
 from .fmriprep_wrapper import process_data
 from .events_long import create_events_and_confounds
@@ -159,6 +159,14 @@ def main():
             nordic_config=args.nordic_config,
             nifti=args.nifti
         )
+    
+    ##### Remove the scans marked as 'unusable' #####
+    remove_unusable_runs(
+        xml_file=args.xml_path,
+        bids_data_path=args.bids_path,
+        subject=args.subject,
+        session=args.session
+    )
 
     ##### Pair field maps to functional runs #####
     bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
