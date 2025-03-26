@@ -35,7 +35,7 @@ dependencies = [
     "torchaudio<3.0.0,>=2.5.1",
 ]
 name = "oceanproc"
-version = "0.1.0"
+version = "1.0.0"
 description = "MRI preprocessing for WUSTL Ocean labs"
 readme = "README.md"
 
