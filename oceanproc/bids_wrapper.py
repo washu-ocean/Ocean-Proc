@@ -110,43 +110,8 @@ def run_dcm2bids(subject:str,
     :raise RuntimeError: If dcm2bids exits with a non-zero exit code.
     """
 
-    # for p in [source_dir, bids_output_dir, config_file]:
-    #     if not p.exists():
-    #         exit_program_early(f"Path {str(p)} does not exist.")
-
     if shutil.which('dcm2bids') == None:
             exit_program_early("Cannot locate program 'dcm2bids', make sure it is in your PATH.")
-    
-    # tmp_path = bids_output_dir / f"tmp_dcm2bids/sub-{subject}_ses-{session}"
-    
-    # def clean_up(quiet=False):
-    #     try:
-    #         logger.debug(f"removing the temporary directory used by dcm2bids: {tmp_path}")
-    #         shutil.rmtree(tmp_path)
-    #     except Exception:
-    #         if not quiet:
-    #             logger.warning(f"There was a problem deleting the temporary directory at {tmp_path}")
-    
-    # if (path_that_exists := bids_output_dir/f"sub-{subject}/ses-{session}").exists():
-    #     ans = prompt_user_continue(dedent(f"""
-    #                                 A raw data bids path for this subject and session already exists. 
-    #                                 Would you like to delete its contents and rerun dcm2bids? If not,
-    #                                 dcm2bids will be skipped.
-    #                                       """))
-    #     if ans:
-    #         logger.debug("removing the old BIDS raw data directory and its contents")
-    #         shutil.rmtree(path_that_exists)
-    #     else:
-    #         return
-        
-    # nifti_path = None
-    # clean_up(quiet=True)    
-    # if not nifti:
-    #     run_dcm2niix(source_dir=source_dir, 
-    #                  tmp_nifti_dir=tmp_path)
-    #     nifti_path = tmp_path
-    # else:
-    #     nifti_path = source_dir
 
     helper_command = shlex.split(f"""{shutil.which('dcm2bids')} 
                                  --bids_validate 
@@ -206,8 +171,6 @@ def run_dcm2bids(subject:str,
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
         exit_program_early("Problem running 'dcm2bids'.")
-    # if not flags.debug:
-    #     clean_up()
 
 
 @debug_logging
@@ -345,9 +308,6 @@ def dicom_to_bids(subject:str,
     if not flags.debug:
         clean_up()
         
-    # remove_unusable_runs(xml_file=xml_path, 
-    #                      bids_data_path=bids_dir, 
-    #                      subject=subject)
 
 
 if __name__ == "__main__":
