@@ -534,6 +534,8 @@ def main():
                                   help="The file type of the functional runs to use.")
     config_arguments.add_argument("--brain_mask", "-bm", type=Path,
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
+    config_arguments.add_argument("--func_space",
+                                  help="Space that the preprocessed data should be in (for example, 'T2w', 'MNIInfant', etc.)")
     config_arguments.add_argument("--derivs_dir", "-d", type=Path, required=True,
                                   help="Path to the BIDS formatted derivatives directory containing processed outputs.")
     config_arguments.add_argument("--preproc_subfolder", "-pd", type=str, default="fmriprep",
@@ -682,7 +684,10 @@ def main():
     try:
         # find all preprocessed BOLD runs for this subject and session
         preproc_derivs = args.derivs_dir / args.preproc_subfolder
-        bold_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*bold{args.bold_file_type}"))
+        if args.func_space:
+            bold_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*space-{args.func_space}*bold{args.bold_file_type}"))
+        else:
+            bold_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*bold{args.bold_file_type}"))
         assert len(bold_files) > 0, "Did not find any bold files in the given derivatives directory for the specified task and file type"
 
         # for each BOLD run, find the accompanying confounds file and events/events long file
