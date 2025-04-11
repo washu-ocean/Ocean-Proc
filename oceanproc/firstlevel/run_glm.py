@@ -536,6 +536,9 @@ def main():
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
     config_arguments.add_argument("--func_space",
                                   help="Space that the preprocessed data should be in (for example, 'T2w', 'MNIInfant', etc.)")
+    config_arguments.add_argument("--fwhm",
+                                  help="FWHM smoothing kernel, in mm (only applies to CIFTI data)",
+                                  type=float)
     config_arguments.add_argument("--derivs_dir", "-d", type=Path, required=True,
                                   help="Path to the BIDS formatted derivatives directory containing processed outputs.")
     config_arguments.add_argument("--preproc_subfolder", "-pd", type=str, default="fmriprep",
@@ -740,6 +743,7 @@ def main():
                 func_file=run_map['bold'],
                 brain_mask=args.brain_mask,
                 need_tr=(not tr),
+                fwhm=args.fwhm
             )
 
             tr = tr if tr else read_tr
