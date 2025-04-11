@@ -5,6 +5,7 @@ import json
 from types import SimpleNamespace
 import nibabel as nib
 import nilearn.masking as nmask
+from nilearn.image import smooth_img
 import os
 import numpy as np
 
@@ -231,7 +232,8 @@ def export_args_to_file(args,
 @debug_logging
 def load_data(func_file: str|Path,
               brain_mask: str = None,
-              need_tr: bool = False) -> np.ndarray:
+              need_tr: bool = False,
+              fwhm: float = None) -> np.ndarray:
     tr = None
     func_file = str(func_file)
     if need_tr:
@@ -246,7 +248,10 @@ def load_data(func_file: str|Path,
         return (img.get_fdata(), tr, img.header)
     elif func_file.endswith(".nii") or func_file.endswith(".nii.gz"):
         if brain_mask:
-            return (nmask.apply_mask(func_file, brain_mask), tr, None)
+            img = nib.load(func_file)
+            if fwhm is not None:
+                img = smooth_img(img, fwhm)
+            return (nmask.apply_mask(img, brain_mask), tr, None)
         else:
             raise Exception("Volumetric data must also have an accompanying brain mask")
             # return None 
