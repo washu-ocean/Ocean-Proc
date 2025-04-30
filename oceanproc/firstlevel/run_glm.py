@@ -126,7 +126,8 @@ def hrf_convolve_features(features: pd.DataFrame,
                           time_col: str = 'index',
                           units: str = 's',
                           time_to_peak: int = 5,
-                          undershoot_dur: int = 12):
+                          undershoot_dur: int = 12,
+                          custom_hrf: Path = None):
     """
     This function convolves a hemodynamic response function with each column in a timeseries dataframe.
 
@@ -170,7 +171,10 @@ def hrf_convolve_features(features: pd.DataFrame,
         time = features.index.to_numpy()
 
     convolved_features = pd.DataFrame(index=time)
-    hrf_sig = create_hrf(time, time_to_peak=time_to_peak, undershoot_dur=undershoot_dur)
+    breakpoint()
+    hrf_sig = np.loadtxt(custom_hrf) if custom_hrf is not None else create_hrf(time, time_to_peak=time_to_peak, undershoot_dur=undershoot_dur)
+    breakpoint()
+
     for a in column_names:
         convolved_features[a] = np.convolve(features[a], hrf_sig)[:len(time)]
 
@@ -250,7 +254,7 @@ def make_noise_ts(confounds_file: str,
 @debug_logging
 def events_to_design(events_long: pd.DataFrame,
                      fir: int = None,
-                     hrf: tuple[int] = None,
+                     hrf: list[int] | Path = None,
                      fir_list: list[str] = None,
                      hrf_list: list[str] = None,
                      unmodeled_list: list[str] = None,
@@ -293,8 +297,9 @@ def events_to_design(events_long: pd.DataFrame,
     events_matrix = events_long.copy()
     if fir and fir <= 0:
         raise ValueError(f"fir value must be greater than 0. Current fir: {fir}")
-    if hrf and not (len(hrf) == 2 and hrf[0] > 0 and hrf[1] > 0):
-        raise ValueError(f"hrf tuple must contain two integers greater than 0. Current hrf tuple: {hrf}")
+    if hrf:
+        if not (isinstance(hrf, Path) or ((len(hrf) == 2 and hrf[0] > 0 and hrf[1] > 0))):
+            raise ValueError(f"hrf tuple must contain two integers greater than 0 or be the path to a txt file. Current hrf: {hrf}")
     # If both FIR and HRF are specified, we should have at least one list
     # of columns for one of the categories specified.
     if (fir and hrf) and not (fir_list or hrf_list):
@@ -335,8 +340,9 @@ def events_to_design(events_long: pd.DataFrame,
 
         cfeats = hrf_convolve_features(features=events_matrix,
                                        column_names=hrf_conditions,
-                                       time_to_peak=hrf[0],
-                                       undershoot_dur=hrf[1])
+                                       time_to_peak=hrf[0] if isinstance(hrf, list) else None,
+                                       undershoot_dur=hrf[1] if isinstance(hrf, list) else None,
+                                       custom_hrf=hrf if isinstance(hrf, Path) else None)
         for c in hrf_conditions:
             events_matrix[c] = cfeats[c]
 
@@ -562,6 +568,8 @@ def main():
     config_arguments.add_argument("--hrf_vars", nargs="*",
                                   help="""A list of the task regressors to apply this HRF model to. The default is to apply it to all regressors if no
                         value is specifed. A list must be specified if both types of models are being used.""")
+    config_arguments.add_argument("--custom_hrf", "-ch", type=Path,
+                                  help="The path to a txt file containing the timeseries for a custom hrf to use instead of the double gamma hrf")
     config_arguments.add_argument("--unmodeled", "-um", nargs="*",
                                   help="""A list of the task regressors to leave unmodeled, but still included in the final design matrix. These are
                         typically continuous variables that need not be modeled with hrf or fir, but any of the task regressors can be included.""")
@@ -571,6 +579,7 @@ def main():
                                   help="A list of confounds to include from each confound timeseries tsv file.")
     config_arguments.add_argument("--fd_threshold", "-fd", type=float, default=0.9,
                                   help="The framewise displacement threshold used when censoring high-motion frames")
+    # Add tmask flag
     config_arguments.add_argument("--repetition_time", "-tr", type=float,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
@@ -585,8 +594,9 @@ def main():
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=int,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
-    config_arguments.add_argument("--nuisance_regression", "-nr", action="store_true",
-                                  help="Flag to indicate that nuisance regression should be performed before performing the GLM for event-related activation.")
+    config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*",
+                                  help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
+                                  all nuisance/confound variables will be included""")
     config_arguments.add_argument("--nuisance_fd", "-nf", type=float,
                                   help="The framewise displacement threshold used when censoring frames for nuisance regression.")
     config_arguments.add_argument("--highpass", "-hp", type=float, nargs="?", const=0.008,
@@ -608,6 +618,11 @@ def main():
             parser.error("Must specify variables to apply each model to if using both types of models")
     elif args.hrf is None and args.fir is None:
         parser.error("Must include model parameters for at least one of the models, fir or hrf.")
+
+    if args.custom_hrf:
+        if not (args.custom_hrf.exists() and args.custom_hrf.suffix == ".txt"):
+            parser.error("The 'custom_hrf' argument must be a file of type '.txt' and must exist")
+        args.hrf = args.custom_hrf
 
     if args.bold_file_type[0] != ".":
         args.bold_file_type = "." + args.bold_file_type
@@ -846,7 +861,7 @@ def main():
                     unmodified_output_dir_contents.discard(cleaned_filename)
 
             # nuisance regression if specified
-            if args.nuisance_regression:
+            if args.nuisance_regression is not None:
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
                 if args.nuisance_fd:
                     logger.info(f" censoring timepoints for nuisance regression using the framewise displacement threshold of {args.nuisance_fd}")
@@ -854,11 +869,22 @@ def main():
                     nuisance_fd_mask = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask] < args.nuisance_fd
                     nuisance_mask &= nuisance_fd_mask
                     logger.info(f" a total of {np.sum(~nuisance_mask)} timepoints will be censored with this nuisance framewise displacement threshold")
-
+                
+                noise_columns = noise_df.columns.to_list()
+                not_found_noise_vars = {c for c in args.nuisance_regression if c not in noise_columns}
+                if len(not_found_noise_vars) > 0:
+                    logger.info(f"The following nuisance variables were not found in the nuisance matrix and will not be used for nuisance regression: {','.join(not_found_noise_vars)}")
+                args.nuisance_regression = list({c for c in args.nuisance_regression if c in noise_columns}) if len(args.nuisance_regression)>0 else noise_columns
+                leftover_noise_columns = [c for c in noise_columns if c not in args.nuisance_regression]
+                if "mean" not in args.nuisance_regression:
+                    args.nuisance_regression.append("mean")
+                noise_regression_df = noise_df.loc[:, args.nuisance_regression].copy()
+                noise_df = noise_df.loc[:, leftover_noise_columns].copy() if len(leftover_noise_columns) > 0 else None
+                    
                 logger.info(" performing nuisance regression")
                 nuisance_betas, func_data_residuals = massuni_linGLM(
                     func_data=func_data,
-                    design_matrix=noise_df,
+                    design_matrix=noise_regression_df,
                     mask=nuisance_mask
                 )
 
@@ -882,7 +908,7 @@ def main():
                     unmodified_output_dir_contents.discard(nr_filename)
 
                     # save out the nuisance betas
-                    for i, noise_col in enumerate(noise_df.columns):
+                    for i, noise_col in enumerate(noise_regression_df.columns):
                         beta_img, img_suffix = create_image(
                             data=np.expand_dims(nuisance_betas[i,:], axis=0),
                             brain_mask=args.brain_mask,
@@ -926,8 +952,8 @@ def main():
                     unmodified_output_dir_contents.discard(filtered_filename)
 
             # apppend the run-wise data to the session list
-            assert func_data.shape[0] == len(noise_df), "The functional data and the nuisance matrix have a different number of timepoints"
-            if not args.nuisance_regression:
+            if noise_df is not None:
+                assert func_data.shape[0] == len(noise_df), "The functional data and the nuisance matrix have a different number of timepoints"
                 logger.info(" appending the nuisance matrix to the run list")
                 noise_df_list.append(noise_df)
 
