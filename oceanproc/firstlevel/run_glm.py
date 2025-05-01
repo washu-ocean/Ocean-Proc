@@ -171,9 +171,7 @@ def hrf_convolve_features(features: pd.DataFrame,
         time = features.index.to_numpy()
 
     convolved_features = pd.DataFrame(index=time)
-    breakpoint()
     hrf_sig = np.loadtxt(custom_hrf) if custom_hrf is not None else create_hrf(time, time_to_peak=time_to_peak, undershoot_dur=undershoot_dur)
-    breakpoint()
 
     for a in column_names:
         convolved_features[a] = np.convolve(features[a], hrf_sig)[:len(time)]
@@ -875,9 +873,10 @@ def main():
                 if len(not_found_noise_vars) > 0:
                     logger.info(f"The following nuisance variables were not found in the nuisance matrix and will not be used for nuisance regression: {','.join(not_found_noise_vars)}")
                 args.nuisance_regression = list({c for c in args.nuisance_regression if c in noise_columns}) if len(args.nuisance_regression)>0 else noise_columns
-                leftover_noise_columns = [c for c in noise_columns if c not in args.nuisance_regression]
                 if "mean" not in args.nuisance_regression:
                     args.nuisance_regression.append("mean")
+                    
+                leftover_noise_columns = [c for c in noise_columns if c not in args.nuisance_regression]
                 noise_regression_df = noise_df.loc[:, args.nuisance_regression].copy()
                 noise_df = noise_df.loc[:, leftover_noise_columns].copy() if len(leftover_noise_columns) > 0 else None
                     
