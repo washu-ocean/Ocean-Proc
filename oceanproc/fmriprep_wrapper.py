@@ -18,12 +18,14 @@ import copy
 logger = logging.getLogger(__name__)
 plt.set_loglevel("warning")
 
+
 @debug_logging
 def run_fmri_prep(subject:str,
                   bids_path:Path,
                   derivs_path:Path,
                   option_chain:str,
-                  remove_work_folder:Path=None):
+                  remove_work_folder:Path = None,
+                  unknown_args: list = None):
     """
     Run fmriprep with parameters.
 
@@ -39,7 +41,7 @@ def run_fmri_prep(subject:str,
     :type remove_work_folder: str
     :raise RuntimeError: If fmriprep throws an error, or exits with a non-zero exit code.
     """
-    clean_up = lambda : shutil.rmtree(remove_work_folder) if remove_work_folder else None
+    def clean_up(): return shutil.rmtree(remove_work_folder) if remove_work_folder else None
 
     log_linebreak()
     logger.info("####### Starting fMRIPrep #######\n")
@@ -49,8 +51,6 @@ def run_fmri_prep(subject:str,
         exit_program_early(f"Derivatives path {derivs_path} does not exist.")
     elif shutil.which('fmriprep-docker') == None:
         exit_program_early("Cannot locate program 'fmriprep-docker', make sure it is in your PATH.")
-
-    
 
     uid = Popen(["id", "-u"], stdout=PIPE).stdout.read().decode("utf-8").strip()
     gid = Popen(["id", "-g"], stdout=PIPE).stdout.read().decode("utf-8").strip()
@@ -64,7 +64,9 @@ def run_fmri_prep(subject:str,
                                  {option_chain}
                                  {str(bids_path)}
                                  {str(derivs_path)}
-                                 participant""")
+                                 participant
+                                 {'' if unknown_args is None else ' '.join(unknown_args)}
+                                 """)
     try:
         command_str = " ".join(helper_command)
         logger.info(f"Running fmriprep-docker with the following command: \n  {command_str} \n")
@@ -79,8 +81,8 @@ def run_fmri_prep(subject:str,
                 raise RuntimeError("'fmriprep-docker' has ended with a non-zero exit code.")
     except RuntimeError as e:
         prepare_subprocess_logging(logger, stop=True)
-        logger.exception(e, stack_info=True) 
-        exit_program_early("Program 'fmriprep-docker' has run into an error.", 
+        logger.exception(e, stack_info=True)
+        exit_program_early("Program 'fmriprep-docker' has run into an error.",
                            None if flags.debug else clean_up)
     if not flags.debug:
         clean_up()
@@ -101,7 +103,7 @@ def add_fd_plot_to_report(subject:str,
     :param derivs_path: Path to BIDS-compliant derivatives folder.
     :type derivs_path: pathlib.Path
     """
-    
+
     func_path = derivs_path / f"sub-{subject}" / f"ses-{session}" / "func"
     figures_path = derivs_path / f"sub-{subject}" / "figures"
     report_path = derivs_path / f"sub-{subject}.html"
@@ -109,7 +111,7 @@ def add_fd_plot_to_report(subject:str,
     for p in [func_path, figures_path, report_path]:
         if not p.exists():
             exit_program_early(f"Expected Path {str(p)} does not exist.")
-    
+
     log_linebreak()
     logger.info("####### Appending FD Plots to fMRIPrep Report #######\n")
 
@@ -118,23 +120,23 @@ def add_fd_plot_to_report(subject:str,
     soup = bsoup(report_file.read(), 'html.parser')
     report_file.close()
 
-    for f in func_path.glob("*desc-confounds_timeseries.tsv"): 
+    for f in func_path.glob("*desc-confounds_timeseries.tsv"):
         logger.info(f"plotting framewise displacement from confounds file:{f}")
-        try :                                                                                                    
-            run = f.name.split("run-")[-1].split("_")[0]  
-            task = f.name.split("task-")[-1].split("_")[0]  
+        try:
+            run = f.name.split("run-")[-1].split("_")[0]
+            task = f.name.split("task-")[-1].split("_")[0]
 
-            # read the repetition time from the json files for the BOLD data                                                                                               
-            bold_js = list(f.parent.glob(f"*task-{task}*run-{run}*bold.json"))[0] 
-            logger.debug(f" reading repetition time from JSON file: {bold_js}")                                                              
-            tr = None                                                                                                                       
-            with open(bold_js, "r") as jf: 
+            # read the repetition time from the json files for the BOLD data
+            bold_js = list(f.parent.glob(f"*task-{task}*run-{run}*bold.json"))[0]
+            logger.debug(f" reading repetition time from JSON file: {bold_js}")
+            tr = None
+            with open(bold_js, "r") as jf:
                 tr = float(json.load(jf)["RepetitionTime"])
 
-            # read in the confounds file 
+            # read in the confounds file
             confound_df = pd.read_csv(f, sep="\t")
             n_frames = len(confound_df["framewise_displacement"])
-            x_vals = np.arange(0, n_frames*tr, tr)
+            x_vals = np.arange(0, n_frames * tr, tr)
             mean_fd = np.mean(confound_df["framewise_displacement"])
             func_thresh = 0.9
             rest_thresh = 0.2
@@ -143,11 +145,11 @@ def add_fd_plot_to_report(subject:str,
             fig, ax = plt.subplots(1,1, figsize=(15,5))
             # ax.set_ylabel("Displacement (mm)")
             ax.set_xlabel("Time (sec)")
-            ax.plot(x_vals, confound_df["framewise_displacement"], label="FD Trace")                    
-            ax.plot(x_vals, [func_thresh]*n_frames, label=f"Threshold: {func_thresh}")
-            ax.plot(x_vals, [rest_thresh]*n_frames, label=f"Threshold: {rest_thresh}")
-            ax.plot(x_vals, [mean_fd]*n_frames, label=f"Mean: {round(mean_fd,2)}")         
-            ax.set_xlim(0, (n_frames*tr))                                                                              
+            ax.plot(x_vals, confound_df["framewise_displacement"], label="FD Trace")
+            ax.plot(x_vals, [func_thresh] * n_frames, label=f"Threshold: {func_thresh}")
+            ax.plot(x_vals, [rest_thresh] * n_frames, label=f"Threshold: {rest_thresh}")
+            ax.plot(x_vals, [mean_fd] * n_frames, label=f"Mean: {round(mean_fd,2)}")
+            ax.set_xlim(0, (n_frames * tr))
             ax.set_ylim(0, 1.5)
             ax.legend(loc="upper left")
             plot_path = figures_path / f"sub-{subject}_ses-{session}_task-{task}_run-{run}_desc-fd-trace.svg"
@@ -157,7 +159,7 @@ def add_fd_plot_to_report(subject:str,
             # find the location in the report where the new figure will go
             confounds_plot_div = soup.find(id=lambda x: (f"desc-carpetplot_run-{run}" in x) if x else False)
 
-            # Copy a div element from the report and add the new figure into it 
+            # Copy a div element from the report and add the new figure into it
             fd_plot_div = copy.copy(confounds_plot_div)
             del fd_plot_div["id"]
             fd_plot_div.p.extract()
@@ -189,7 +191,8 @@ def process_data(subject:str,
                  session:str,
                  bids_path:Path,
                  derivs_path:Path,
-                 remove_work_folder:Path=None,
+                 remove_work_folder:Path = None,
+                 unknown_args:list = None,
                  **kwargs):
     """
     Faciliates the running of fmriprep and any additions to the output report.
@@ -208,15 +211,14 @@ def process_data(subject:str,
     """
 
     fmriprep_option_chain = " ".join([make_option(v, key=k, delimeter="=", convert_underscore=True) for k,v in kwargs.items()])
-    
+
     run_fmri_prep(subject=subject,
                   bids_path=bids_path,
                   derivs_path=derivs_path,
                   option_chain=fmriprep_option_chain,
-                  remove_work_folder=remove_work_folder)
-    
+                  remove_work_folder=remove_work_folder,
+                  unknown_args=unknown_args)
+
     add_fd_plot_to_report(subject=subject,
                           session=session,
                           derivs_path=derivs_path)
-    
-
