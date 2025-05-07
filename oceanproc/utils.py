@@ -91,6 +91,9 @@ def extract_options(option_chain:list) -> dict:
     vals = []
     opts = dict()
     key = None
+    if len(option_chain) < 1:
+        return opts
+    
     if not (isinstance(option_chain[0], str) and option_chain[0].startswith("-")):
         exit_program_early(f"cannot parse option chain: {option_chain}")
 
@@ -194,7 +197,7 @@ def prepare_subprocess_logging(this_logger,
                 h.terminator = ""
             this_logger = this_logger.parent
 
-
+@debug_logging
 def run_subprocess(cmd: str, title: str):
     logger.info(f"running '{title}' with the following command: \n{cmd}\n")
     split_cmd = shlex.split(cmd)
@@ -233,7 +236,8 @@ def log_linebreak():
 @debug_logging
 def export_args_to_file(args, 
                         argument_group, 
-                        file_path: Path):
+                        file_path: Path,
+                        extra_args):
     """
     Takes the arguments in the argument group, and exports their names and values in the 'args'
     namespace to a file specified at 'file_path'. The input 'file_path' can either be a txt

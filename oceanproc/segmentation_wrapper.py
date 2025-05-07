@@ -23,7 +23,8 @@ segmentation_args = {
     "start",
     "end",
     "fsl-bin-path",
-    "overwrite-old"
+    "overwrite-old", 
+    "overwrite"
 }
 
 @debug_logging

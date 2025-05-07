@@ -7,7 +7,7 @@ import logging
 import datetime
 from .bids_wrapper import dicom_to_bids, remove_unusable_runs
 from .group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
-from .preprocessing_wrapper import process_data
+from .preprocessing_wrapper import process_data, adult_defaults, infant_defaults
 from .segmentation_wrapper import segmentation_args, segment_anatomical
 from .events_long import create_events_and_confounds
 from .utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option
@@ -71,8 +71,11 @@ def main():
                                    help="Flag to indicate that fMRIPrep does not need to be run for this subject and session")
     session_arguments.add_argument("--skip_event_files", action="store_true",
                                    help="Flag to indicate that the making of a long formatted events file is not needed for the subject and session")
+    # export_arg_opts = session_arguments.add_mutually_exclusive_group()
     session_arguments.add_argument("--export_args", "-ea", type=Path,
                                    help="Path to a file to save the current configuration arguments")
+    # export_arg_opts.add_argument("--export_args_plus", "-eap", type=Path,
+                                #    help="Path to a file to save the current configuration arguments as well as the extra preprocessing arguments.")
     session_arguments.add_argument("--keep_work_dir", action="store_true",
                                    help="Flag to stop the deletion of the fMRIPrep working directory")
     session_arguments.add_argument("--debug", action="store_true",
@@ -84,8 +87,9 @@ def main():
                                   help="The path to the directory containing the raw nifti data for all subjects, in BIDS format")
     config_arguments.add_argument("--derivs_path", "-d", type=Path, required=True,
                                   help="The path to the BIDS formated derivatives directory for this subject")
-    config_arguments.add_argument("--derivs_subfolder", "-ds", default="fmriprep",
-                                  help="The subfolder in the derivatives directory where bids style outputs should be stored. The default is 'fmriprep'.")
+    config_arguments.add_argument("--derivs_subfolder", "-ds", default=None,
+                                  help=f"""The subfolder in the derivatives directory where bids style outputs should be stored. 
+                                  The default is {adult_defaults.derivs_subfolder} or {infant_defaults.derivs_subfolder} if the '--infant' flag is set.""")
     config_arguments.add_argument("--bids_config", "-c", type=Path, required=True,
                                   help="The path to the dcm2bids config file to use for this subject and session")
     config_arguments.add_argument("--nordic_config", "-n", type=Path,
@@ -106,14 +110,15 @@ def main():
                                   help="The path to the working directory used to store intermediate files")
     config_arguments.add_argument("--fs_license", "-l", type=Path, required=True,
                                   help="The path to the license file for the local installation of FreeSurfer")
-    config_arguments.add_argument("--fmriprep_version", "-fv", default="23.1.4", dest="image",
-                                  help="The version of fmriprep to use. The default is 23.1.4. It is reccomended that an entire study use the same version.")
+    config_arguments.add_argument("--image_version", "-iv", default=None,
+                                  help=f"""The version of fmriprep to use; It is reccomended that an entire study use the same version. 
+                                  The default is {adult_defaults.image_version} or {infant_defaults.image_version} if the '--infant' flag is set.""")
     config_arguments.add_argument("--infant", "-I", action=argparse.BooleanOptionalAction,
                                   help="Flag to specify that NiBabies should be used instead of fMRIPrep")
     config_arguments.add_argument("--bibsnet_image_path", "-bi", type=Path,
                                   help="Path to the BIBSnet apptainer image to use for segmentation. If provided, BIBSnet segmentation will be run and the outputs will be used for preprocessing. (Must be used with the '--infant' flag)")
     args, unknown_args = parser.parse_known_args()
-
+    breakpoint()
     try:
         assert args.derivs_path.is_dir(), "Derivatives directory must exist but it cannot be found"
         assert args.bids_path.is_dir(), "Raw Bids directory must exist but it cannot be found"
@@ -122,6 +127,15 @@ def main():
     except AssertionError as e:
         logger.exception(e)
         exit_program_early(e)
+
+    defaults = infant_defaults if args.infant else adult_defaults
+    for k,v in defaults.__dict__.items():
+        if k in args.__dict__ and args.__dict__[k] is None:
+            args.__dict__[k] = v
+
+    unknown_args = extract_options(unknown_args)
+
+    breakpoint()
 
     ##### Export the current configuration arguments to a file #####
     if args.export_args:
@@ -132,9 +146,8 @@ def main():
         except Exception as e:
             logger.exception(e)
             exit_program_early(e)
-
-    args.image = f"nipreps/nibabies:{args.image}" if args.infant else f"nipreps/fmriprep:{args.image}"
-
+    
+    preproc_image = f"{defaults.image_name}:{args.image_version}"
     preproc_derivs_path = args.derivs_path / args.derivs_subfolder
 
     log_dir = preproc_derivs_path / f"sub-{args.subject}/log"
@@ -146,7 +159,7 @@ def main():
         flags.debug = True
         logger.setLevel(logging.DEBUG)
 
-    unknown_args = extract_options(unknown_args)
+    
 
     logger.info("Starting oceanproc...")
     logger.info(f"Log will be stored at {log_path}")
@@ -215,7 +228,7 @@ def main():
             **bibsnet_args
         )
 
-        bibsnet_path = args.derivs_path / "bibsnet"
+        bibsnet_path = (args.derivs_path / "bibsnet").resolve()
         if not bibsnet_path.exists():
             exit_program_early(f"Cannot find the outputs for BIBSnet at the path {bibsnet_path}")
         if bibsnet_path not in args.derivatives:
@@ -240,7 +253,7 @@ def main():
             derivs_path=preproc_derivs_path,
             work_path=preproc_work_dir,
             license_file=args.fs_license,
-            image_name=args.image,
+            image_name=preproc_image,
             additional_mounts=additional_mounts,
             remove_work_folder=not args.keep_work_dir,
             is_infant=args.infant

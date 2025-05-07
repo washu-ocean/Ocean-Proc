@@ -15,9 +15,22 @@ import numpy as np
 import json
 import os
 import copy
+from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 plt.set_loglevel("warning")
+
+adult_defaults = SimpleNamespace(
+    image_name="nipreps/fmriprep",
+    image_version="23.1.4",
+    derivs_subfolder="fmriprep",
+)
+
+infant_defaults = SimpleNamespace(
+    image_name="nipreps/nibabies",
+    image_version="25.0.1",
+    derivs_subfolder="nibabies",
+)
 
 
 @debug_logging
