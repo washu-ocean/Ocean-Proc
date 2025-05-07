@@ -2,6 +2,8 @@ import sys
 import logging
 from pathlib import Path
 import json
+from subprocess import Popen, PIPE
+import shlex
 from types import SimpleNamespace
 import nibabel as nib
 import nilearn.masking as nmask
@@ -85,6 +87,25 @@ def prompt_user_continue(msg:str) -> bool:
     logger.debug(f"User Response:  {user_continue} ({ans})")
     return ans
 
+def extract_options(option_chain:list) -> dict:
+    vals = []
+    opts = dict()
+    key = None
+    if not (isinstance(option_chain[0], str) and option_chain[0].startswith("-")):
+        exit_program_early(f"cannot parse option chain: {option_chain}")
+
+    for o in option_chain:
+        if isinstance(o, str) and o.startswith("-"):
+            if key:
+                opts[key] = vals
+            key = o.lstrip("-")
+            vals = []
+        elif key:
+            vals.append(o)
+    else:
+        if key:
+            opts[key] = vals
+    return opts
 
 def make_option(value, 
                 key: str=None, 
@@ -172,6 +193,22 @@ def prepare_subprocess_logging(this_logger,
                 h.setFormatter(logging.Formatter("%(message)s"))
                 h.terminator = ""
             this_logger = this_logger.parent
+
+
+def run_subprocess(cmd: str, title: str):
+    logger.info(f"running '{title}' with the following command: \n{cmd}\n")
+    split_cmd = shlex.split(cmd)
+    prepare_subprocess_logging(logger)
+    with Popen(split_cmd, stdout=PIPE, stderr=PIPE) as p:
+        while p.poll() == None:
+            for line in p.stdout:
+                logger.info(line.decode("utf-8", "ignore"))
+            for line in p.stderr:
+                logger.info(line.decode("utf-8", "ignore"))
+        prepare_subprocess_logging(logger, stop=True)
+        p.kill()
+        if p.poll() != 0:
+            raise RuntimeError(f"process -'{title}'- has ended with a non-zero exit code.")
 
 
 def log_linebreak():

@@ -2,7 +2,8 @@
 
 from pathlib import Path
 import logging
-from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak
+from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess
+# from .fmriprep_wrapper import add_fd_plot_to_report
 import shlex
 import shutil
 from subprocess import Popen, PIPE
@@ -20,19 +21,19 @@ plt.set_loglevel("warning")
 
 
 @debug_logging
-def run_fmri_prep(subject:str,
-                  session:str,
-                  bids_path:Path,
-                  derivs_path:Path,
-                  work_path:Path,
-                  license_file:Path,
-                  image_name:str,
-                  option_chain:str,
-                  remove_work_folder:bool = True,
-                #   unknown_args: list = None
-                  ):
+def run_preprocessing(subject:str,
+                      bids_path:Path,
+                      derivs_path:Path,
+                      work_path:Path,
+                      license_file:Path,
+                      image_name:str,
+                      title:str,
+                      option_chain:str,
+                      additional_mounts:dict[str, ],
+                      session:str = None,
+                      remove_work_folder:bool = True):
     """
-    Run fmriprep with parameters.
+    Run preprocessing with parameters.
 
     :param subject: Name of subject (ex. if path contains 'sub-5000', subject='5000')
     :type subject: str
@@ -55,17 +56,29 @@ def run_fmri_prep(subject:str,
     def clean_up(): return shutil.rmtree(remove_work_folder) if remove_work_folder else None
 
     log_linebreak()
-    logger.info("####### Starting NiBabies #######\n")
+    logger.info(f"####### Starting {title} #######\n")
     if not bids_path.exists():
         exit_program_early(f"Bids path {bids_path} does not exist.")
     elif not derivs_path.exists():
         exit_program_early(f"Derivatives path {derivs_path} does not exist.")
-    # elif shutil.which('fmriprep-docker') == None:
-    #     exit_program_early("Cannot locate program 'fmriprep-docker', make sure it is in your PATH.")
     
-    mount_strs = [(f"-v {v}:/deriv{i}", f"{k} /deriv{i}") for i, (k,v) in enumerate(additional_mounts.items())]
-    additional_mount_paths = " ".join([mount for mount, _ in mount_strs])
-    additional_mount_args = " ".join([arg for _, arg in mount_strs])
+    additional_mount_paths = []
+    additional_mount_args = []
+    mount_dex = 1
+    for k, v in additional_mounts.items():
+        arg_vals = [k]
+        if isinstance(v, list):
+            for sub_v in v:
+                additional_mount_paths.append(f"-v {sub_v}:/deriv{mount_dex}")
+                arg_vals.append(f"/deriv{mount_dex}")
+                mount_dex += 1
+        else:
+            additional_mount_paths.append(f"-v {v}:/deriv{mount_dex}")
+            arg_vals.append(f"/deriv{mount_dex}")
+            mount_dex += 1
+        additional_mount_args.append(" ".join(arg_vals))
+    additional_mount_paths = " ".join(additional_mount_paths)
+    additional_mount_args = " ".join(additional_mount_args)
 
     uid = Popen(["id", "-u"], stdout=PIPE).stdout.read().decode("utf-8").strip()
     gid = Popen(["id", "-g"], stdout=PIPE).stdout.read().decode("utf-8").strip()
@@ -75,7 +88,7 @@ def run_fmri_prep(subject:str,
     bids_mount = "/data"
     derivs_mount = "/out"
     work_mount = "/work"
-    nibabies_command = f"""docker run --rm -it -u {uid}:{gid}
+    preproc_command = f"""docker run --rm -it -u {uid}:{gid}
                             -v {license_file}:{license_mount}:ro
                             -v {bids_path}:{bids_mount}:ro
                             -v {derivs_path}:{derivs_mount}
@@ -83,31 +96,18 @@ def run_fmri_prep(subject:str,
                             {additional_mount_paths}
                             {image_name} {bids_mount} {derivs_mount} participant
                             --participant-label {subject} 
-                            --session-id {session}
+                            {f'--session-id {session}' if session else ''}
                             -w {work_mount} --verbose
                             --cifti-output {cifti_out_res}
                             {additional_mount_args}
                             {option_chain}"""
     
-    
-
-    # helper_command = shlex.split(f"""{shutil.which('fmriprep-docker')} 
-    #                              --user {uid}:{gid}
-    #                              --participant-label={subject}
-    #                              --cifti-output={cifti_out_res}
-    #                              --use-syn-sdc=warn
-    #                              {option_chain}
-    #                              {'' if unknown_args is None else ' '.join(unknown_args)}
-    #                              {str(bids_path)}
-    #                              {str(derivs_path)}
-    #                              participant
-    #                              """)
     try:
-        run_subprocess(nibabies_command, "nibabies")
+        run_subprocess(preproc_command, title=title)
     except RuntimeError as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early("Program 'nibabies' has run into an error.",
+        exit_program_early(f"Program '{title}' has run into an error.",
                            None if flags.debug else clean_up)
     if not flags.debug:
         clean_up()
@@ -211,6 +211,7 @@ def add_fd_plot_to_report(subject:str,
         f.write(soup.prettify())
 
 
+
 @debug_logging
 def process_data(subject:str,
                  session:str,
@@ -219,11 +220,12 @@ def process_data(subject:str,
                  work_path:Path,
                  license_file:Path,
                  image_name:str,
+                 additional_mounts:dict[str, Path],
                  remove_work_folder:bool,
-                #  unknown_args:list = None,
+                 is_infant:bool=False,
                  **kwargs):
     """
-    Faciliates the running of fmriprep and any additions to the output report.
+    Faciliates the running of nibabies and any additions to the output report.
 
     :param subject: Name of subject (ex. if path contains 'sub-5000', subject='5000')
     :type subject: str
@@ -243,20 +245,21 @@ def process_data(subject:str,
     :type remove_work_folder: str
     :param **kwargs: any arguments to be passed to the fmriprep subprocess
     """
-
     fmriprep_option_chain = " ".join([make_option(v, key=k, delimeter="=", convert_underscore=True) for k,v in kwargs.items()])
 
-    run_fmri_prep(subject=subject,
-                  bids_path=bids_path,
-                  derivs_path=derivs_path,
-                  work_path=work_path,
-                  license_file=license_file,
-                  image_name=image_name,
-                  option_chain=fmriprep_option_chain,
-                  remove_work_folder=remove_work_folder,
-                #   unknown_args=unknown_args)
-    )
+    run_preprocessing(subject=subject,
+                      session=session if is_infant else None,
+                      bids_path=bids_path,
+                      derivs_path=derivs_path,
+                      work_path=work_path,
+                      license_file=license_file,
+                      image_name=image_name,
+                      title="NiBabies" if is_infant else "fMRIPrep",
+                      option_chain=fmriprep_option_chain,
+                      additional_mounts=additional_mounts,
+                      remove_work_folder=remove_work_folder)
 
     add_fd_plot_to_report(subject=subject,
                           session=session,
                           derivs_path=derivs_path)
+
