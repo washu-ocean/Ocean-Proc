@@ -88,7 +88,7 @@ def prompt_user_continue(msg:str) -> bool:
     return ans
 
 def extract_options(option_chain:list) -> dict:
-    vals = []
+    val = None
     opts = dict()
     key = None
     if len(option_chain) < 1:
@@ -100,14 +100,19 @@ def extract_options(option_chain:list) -> dict:
     for o in option_chain:
         if isinstance(o, str) and o.startswith("-"):
             if key:
-                opts[key] = vals
+                opts[key] = val
             key = o.lstrip("-")
-            vals = []
+            val = None
         elif key:
-            vals.append(o)
+            if val is None:
+                val = o
+            elif isinstance(val, list):
+                val.append(o)
+            else:
+                val = [val, o]
     else:
         if key:
-            opts[key] = vals
+            opts[key] = val
     return opts
 
 def make_option(value, 
@@ -199,8 +204,8 @@ def prepare_subprocess_logging(this_logger,
 
 @debug_logging
 def run_subprocess(cmd: str, title: str):
-    logger.info(f"running '{title}' with the following command: \n{cmd}\n")
     split_cmd = shlex.split(cmd)
+    logger.info(f"running '{title}' with the following command: \n{' '.join(split_cmd)}\n")
     prepare_subprocess_logging(logger)
     with Popen(split_cmd, stdout=PIPE, stderr=PIPE) as p:
         while p.poll() == None:
@@ -237,7 +242,7 @@ def log_linebreak():
 def export_args_to_file(args, 
                         argument_group, 
                         file_path: Path,
-                        extra_args):
+                        extra_args:dict=None):
     """
     Takes the arguments in the argument group, and exports their names and values in the 'args'
     namespace to a file specified at 'file_path'. The input 'file_path' can either be a txt
@@ -257,11 +262,21 @@ def export_args_to_file(args,
         if a.dest in all_opts and all_opts[a.dest]:
             if type(all_opts[a.dest]) == bool:
                 opts_to_save[a.option_strings[0]] = ""
-                continue
             elif isinstance(all_opts[a.dest], Path):
                 opts_to_save[a.option_strings[0]] = str(all_opts[a.dest].resolve())
+            elif isinstance(all_opts[a.dest], list):
+                opts_to_save[a.option_strings[0]] = [v if isinstance(v, int) or isinstance(v, str) else str(v) for v in all_opts[a.dest]]
+            else:
+                opts_to_save[a.option_strings[0]] = all_opts[a.dest]
+
+    if extra_args:
+        for key, val in extra_args.items():
+            opt_key = make_option(True, key).strip()
+            if not val:
+                opts_to_save[opt_key] = ""
                 continue
-            opts_to_save[a.option_strings[0]] = all_opts[a.dest]
+            opts_to_save[opt_key] = val
+    breakpoint()
     with open(file_path, "w") as f:
         if file_path.suffix == ".json":
             f.write(json.dumps(opts_to_save, indent=4))

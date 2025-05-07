@@ -32,6 +32,16 @@ infant_defaults = SimpleNamespace(
     derivs_subfolder="nibabies",
 )
 
+# Good arguments to have if not specified
+# { key : (val, can_have_multiple_values)}
+preproc_kwargs = {
+    "cifti-output":("91k", False),
+    "output-spaces": ("fsLR", True),
+}
+
+# Preprocessing arguments that need to have their paths binded when running docker
+mount_opts = {"fs_subjects_dir",
+                  "derivatives"}
 
 @debug_logging
 def run_preprocessing(subject:str,
@@ -66,8 +76,8 @@ def run_preprocessing(subject:str,
     :type remove_work_folder: bool
     :raise RuntimeError: If fmriprep throws an error, or exits with a non-zero exit code.
     """
-    def clean_up(): return shutil.rmtree(remove_work_folder) if remove_work_folder else None
-
+    def clean_up(): return shutil.rmtree(work_path) if remove_work_folder else None
+    breakpoint()
     log_linebreak()
     logger.info(f"####### Starting {title} #######\n")
     if not bids_path.exists():
@@ -82,11 +92,11 @@ def run_preprocessing(subject:str,
         arg_vals = [k]
         if isinstance(v, list):
             for sub_v in v:
-                additional_mount_paths.append(f"-v {sub_v}:/deriv{mount_dex}")
+                additional_mount_paths.append(f"-v {sub_v.resolve()}:/deriv{mount_dex}")
                 arg_vals.append(f"/deriv{mount_dex}")
                 mount_dex += 1
         else:
-            additional_mount_paths.append(f"-v {v}:/deriv{mount_dex}")
+            additional_mount_paths.append(f"-v {v.resolve()}:/deriv{mount_dex}")
             arg_vals.append(f"/deriv{mount_dex}")
             mount_dex += 1
         additional_mount_args.append(" ".join(arg_vals))
@@ -95,7 +105,6 @@ def run_preprocessing(subject:str,
 
     uid = Popen(["id", "-u"], stdout=PIPE).stdout.read().decode("utf-8").strip()
     gid = Popen(["id", "-g"], stdout=PIPE).stdout.read().decode("utf-8").strip()
-    cifti_out_res = '91k'
 
     license_mount = "/opt/freesurfer/license.txt"
     bids_mount = "/data"
@@ -111,7 +120,6 @@ def run_preprocessing(subject:str,
                             --participant-label {subject} 
                             {f'--session-id {session}' if session else ''}
                             -w {work_mount} --verbose
-                            --cifti-output {cifti_out_res}
                             {additional_mount_args}
                             {option_chain}"""
     
@@ -258,8 +266,20 @@ def process_data(subject:str,
     :type remove_work_folder: str
     :param **kwargs: any arguments to be passed to the fmriprep subprocess
     """
-    fmriprep_option_chain = " ".join([make_option(v, key=k, delimeter="=", convert_underscore=True) for k,v in kwargs.items()])
 
+    # Add in some recommended options
+    for key, (val, multi) in preproc_kwargs.items():
+        if (key in kwargs) and multi:
+            if isinstance(kwargs[key], list):
+                kwargs[key].append(val)
+            else:
+                kwargs[key] = [kwargs[key], val]
+        elif key not in kwargs:
+            kwargs[key] = val
+
+
+    fmriprep_option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
+    breakpoint()
     run_preprocessing(subject=subject,
                       session=session if is_infant else None,
                       bids_path=bids_path,

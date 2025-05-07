@@ -21,7 +21,9 @@ plt.set_loglevel("warning")
 
 segmentation_args = {
     "start",
+    "starting-stage",
     "end",
+    "ending-stage",
     "fsl-bin-path",
     "overwrite-old", 
     "overwrite"
@@ -57,7 +59,7 @@ def run_bibsnet(subject:str,
     :type remove_work_folder: bool
     :raise RuntimeError: If BIBSnet throws an error, or exits with a non-zero exit code.
     """
-    def clean_up(): return shutil.rmtree(remove_work_folder) if remove_work_folder else None
+    def clean_up(): return shutil.rmtree(work_path) if remove_work_folder else None
 
     log_linebreak()
     logger.info(f"####### Starting BIBSnet #######\n")
@@ -123,8 +125,8 @@ def segment_anatomical(subject:str,
     :type remove_work_folder: str
     :param **kwargs: any arguments to be passed to the fmriprep subprocess
     """
-    option_chain = " ".join([make_option(v, key=k, delimeter="=", convert_underscore=True) for k,v in kwargs.items()])
-
+    option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
+    breakpoint()
     run_bibsnet(subject=subject,
                       session=session,
                       bids_path=bids_path,

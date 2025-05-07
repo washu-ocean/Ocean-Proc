@@ -7,7 +7,7 @@ import logging
 import datetime
 from .bids_wrapper import dicom_to_bids, remove_unusable_runs
 from .group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
-from .preprocessing_wrapper import process_data, adult_defaults, infant_defaults
+from .preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts
 from .segmentation_wrapper import segmentation_args, segment_anatomical
 from .events_long import create_events_and_confounds
 from .utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option
@@ -63,12 +63,12 @@ def main():
                                    help="The path to the xml file for this subject and session")
     session_arguments.add_argument("--skip_dcm2bids", action="store_true",
                                    help="Flag to indicate that dcm2bids does not need to be run for this subject and session")
-    session_arguments.add_argument("--skip_segmentation", action="store_true",
-                                   help="Flag to indicate that segmentation does not need to be run for this subject and session")
     session_arguments.add_argument("--skip_fmap_pairing", action="store_true",
                                    help="Flag to indicate that the pairing of fieldmaps to BOLD runs does not need to be performed for this subject and session")
-    session_arguments.add_argument("--skip_fmriprep", action="store_true",
-                                   help="Flag to indicate that fMRIPrep does not need to be run for this subject and session")
+    session_arguments.add_argument("--skip_segmentation", action="store_true",
+                                   help="Flag to indicate that segmentation does not need to be run for this subject and session")
+    session_arguments.add_argument("--skip_preproc", action="store_true",
+                                   help="Flag to indicate that preprocessing does not need to be run for this subject and session")
     session_arguments.add_argument("--skip_event_files", action="store_true",
                                    help="Flag to indicate that the making of a long formatted events file is not needed for the subject and session")
     # export_arg_opts = session_arguments.add_mutually_exclusive_group()
@@ -135,6 +135,13 @@ def main():
 
     unknown_args = extract_options(unknown_args)
 
+    bibsnet_path = (args.derivs_path / "bibsnet").resolve()
+    if args.infant and args.bibsnet_image_path:
+        if args.derivatives is None:
+            args.derivatives = [bibsnet_path]
+        elif bibsnet_path not in args.derivatives:
+            args.derivatives.append(bibsnet_path)
+            
     breakpoint()
 
     ##### Export the current configuration arguments to a file #####
@@ -142,11 +149,13 @@ def main():
         try:
             assert args.export_args.parent.exists() and args.export_args.suffix, "Argument export path must be a file path in a directory that exists"
             logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######")
-            export_args_to_file(args, config_arguments, args.export_args)
+            export_args_to_file(args, config_arguments, args.export_args, extra_args=unknown_args)
         except Exception as e:
             logger.exception(e)
             exit_program_early(e)
     
+    breakpoint()
+
     preproc_image = f"{defaults.image_name}:{args.image_version}"
     preproc_derivs_path = args.derivs_path / args.derivs_subfolder
 
@@ -158,7 +167,6 @@ def main():
     if args.debug:
         flags.debug = True
         logger.setLevel(logging.DEBUG)
-
     
 
     logger.info("Starting oceanproc...")
@@ -211,12 +219,12 @@ def main():
 
 
     ##### Run BIBSnet #####
+    bibsnet_args = {key:unknown_args[key] for key in segmentation_args if key in unknown_args}
+    for key in segmentation_args:
+        if key in unknown_args:
+            del unknown_args[key]
+
     if args.infant and args.bibsnet_image_path and (not args.skip_segmentation):
-        bibsnet_args = {key:unknown_args[key] for key in segmentation_args if key in unknown_args}
-        for key in segmentation_args:
-            if key in unknown_args:
-                del unknown_args[key]
-        
         segment_anatomical(
             subject=args.subject,
             session=args.session,
@@ -228,24 +236,19 @@ def main():
             **bibsnet_args
         )
 
-        bibsnet_path = (args.derivs_path / "bibsnet").resolve()
         if not bibsnet_path.exists():
             exit_program_early(f"Cannot find the outputs for BIBSnet at the path {bibsnet_path}")
-        if bibsnet_path not in args.derivatives:
-            args.derivatives.append(bibsnet_path)
     
 
-    ##### Run fMRIPrep #####
+    ##### Run fMRIPrep or NiBabies #####
     all_opts = dict(args._get_kwargs())
-    mount_opts = {"fs_subjects_dir",
-                  "derivatives"}
-    additional_mounts = {make_option(True, mo).strip():all_opts[mo] for mo in mount_opts if all_opts[mo]}
 
+    additional_mounts = {make_option(True, mo, convert_underscore=True).strip():all_opts[mo] for mo in mount_opts if all_opts[mo]}
     fmrip_options = {"skip_bids_validation",
                      "fd_spike_threshold",
                      "anat_only"}
 
-    if not args.skip_fmriprep:
+    if not args.skip_preproc:
         process_data(
             subject=args.subject,
             session=args.session,
@@ -256,9 +259,8 @@ def main():
             image_name=preproc_image,
             additional_mounts=additional_mounts,
             remove_work_folder=not args.keep_work_dir,
-            is_infant=args.infant
-            # unknown_args=unknown_args if len(unknown_args) > 0 else None,
-            **{o:all_opts[o] for o in fmrip_options}.update(unknown_args)
+            is_infant=args.infant,
+            **({o:all_opts[o] for o in fmrip_options} | unknown_args)
         )
 
     ##### Create long formatted event files #####
