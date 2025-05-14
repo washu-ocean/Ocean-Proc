@@ -15,7 +15,13 @@ logger = logging.getLogger(__name__)
 
 default_log_format = "%(levelname)s:%(asctime)s:%(module)s: %(message)s"
 
-flags = SimpleNamespace(debug = False)
+flags = SimpleNamespace(debug = False, longitudinal = False)
+
+bids_entities = ["sub", "ses", "sample", "task", "tracksys",
+                "acq", "ce", "trc", "stain", "rec", "dir",
+                "run", "mod", "echo", "flip", "inv", "mt",
+                "part", "proc", "hemi", "space", "split", "recording",
+                "chunk", "seg", "res", "den", "label", "desc"]
 
 def takes_arguments(decorator):
     """

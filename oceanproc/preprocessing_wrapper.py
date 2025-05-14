@@ -3,8 +3,6 @@
 from pathlib import Path
 import logging
 from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess
-# from .fmriprep_wrapper import add_fd_plot_to_report
-import shlex
 import shutil
 from subprocess import Popen, PIPE
 from matplotlib import pyplot as plt
@@ -279,7 +277,7 @@ def process_data(subject:str,
 
 
     fmriprep_option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
-    breakpoint()
+
     run_preprocessing(subject=subject,
                       session=session if is_infant else None,
                       bids_path=bids_path,

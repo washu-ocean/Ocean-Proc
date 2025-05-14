@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 
-import glob
 import json
-import os
 from datetime import datetime
-from collections import defaultdict
 import argparse
 import re
 from pathlib import Path
 import xml.etree.ElementTree as et
+from bids import BIDSLayout
 from .utils import exit_program_early, debug_logging, log_linebreak
 import logging
+module_logger = logging.getLogger("fsspec")
+module_logger.setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 
-
 @debug_logging
-def get_locals_from_xml(xml_path: Path) -> set:
+def get_locals_from_xml(xml_path: Path) -> tuple[set, str]:
     """
     Read in the xml file to find the localizers.
 
@@ -28,6 +27,8 @@ def get_locals_from_xml(xml_path: Path) -> set:
     tree = et.parse(xml_path)
     prefix = "{" + str(tree.getroot()).split("{")[-1].split("}")[0] + "}"
     scan_element_list = list(tree.iter(f"{prefix}scans"))
+    exp_element_list = list(tree.iter(f"{prefix}experiments"))
+    study_id = exp_element_list[0][0].get("study_id")
     
     if len(scan_element_list) != 1:
         exit_program_early(f"Error parsing the xml file provided. Found none or more than one scan groups")
@@ -38,116 +39,91 @@ def get_locals_from_xml(xml_path: Path) -> set:
     for s in scans:
         if re.match(r"Localizer.*", s.get("type")) and s.find(f'{prefix}quality').text == "usable":
             acq_time = datetime.strptime(s.find(f"{prefix}startTime").text, "%H:%M:%S")
-            localizers.add(acq_time)
-    return sorted(localizers)
+            series_id = int(s.get("ID"))
+            localizers.add((acq_time, series_id))
+    return (sorted(localizers), study_id)
 
 
-def get_func_from_bids(bids_path: Path,
-                       localizers: set[int],
-                       json_dict: defaultdict[list],
+def get_func_from_bids(bids_layout: BIDSLayout,
+                       subject:str,
+                       session:str,
+                       localizers: set,
+                       study_id:str,
+                    #    json_dict: defaultdict[list],
                        groupings: list[dict[str:set]]):
-    """
-    Read in the JSON associated with task-based runs from the bids dir, and pair with a localizer run.
+    
+    func_files = bids_layout.get(subject=subject, session=session, suffix="bold", datatype="func", extension="nii.gz")
+    if len(func_files) == 0:
+        exit_program_early("Could not find any functional BOLD files for this subject and session.")
+    
+    for bold_file in func_files:
+        if bold_file.entities["study_id"] != study_id:
+            continue
 
-    :param bids_path: path to BIDS-compliant .nii/.json files
-    :type bids_path: pathlib.Path
-    :param localizers: set of localizer IDs
-    :type localizers: set[int]
-    :param json_dict: dict with each key being a series number, each value being an object representation of it's JSON file with added 'bidsname' and 'filename' attributes
-    :type json_dict: defaultdict[list]
-    :param groupings: list of dictionaries containing mappings of localizers to series number
-    :type groupings: list[dict[str:set]]
-    """
-    bids_func_json = sorted(list(bids_path.glob("func/*bold.json")))
-    if len(bids_func_json) == 0:
-        exit_program_early("Could not find any JSON files for bold runs in the functional directory of the bids data.")
-    for jf in bids_func_json:
-        jd = None
-        with open(jf, "r") as j:
-            jd = json.load(j)
-        series_id = jd["SeriesNumber"]
-        jd["bidsname"] = f"{bids_path.name}/func/{jf.with_suffix('.nii.gz').name}"
-        acq_time = datetime.strptime(jd["AcquisitionTime"], "%H:%M:%S.%f")
-        json_dict[acq_time].append(jd)
-        for i, dt in enumerate(localizers):
+        acq_time = datetime.strptime(bold_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
+        for i, (dt, series_id) in enumerate(localizers):
             if i < len(localizers)-1:
-                if acq_time > dt and acq_time < localizers[i+1]:
-                    groupings[i]["task"].add((series_id, acq_time))
+                if (acq_time > dt and acq_time < localizers[i+1][0]) and bold_file.entities["SeriesNumber"] > series_id:
+                    groupings[i]["task"].add((bold_file, acq_time))
                     break
             else:
-                groupings[i]["task"].add((series_id, acq_time))
+                groupings[i]["task"].add((bold_file, acq_time))
 
 
-# Read in the json for the field maps from the bids dir
-def get_fmap_from_bids(bids_path: Path,
-                       localizers: set[int],
-                       json_dict: defaultdict[list],
+def get_fmap_from_bids(bids_layout: BIDSLayout,
+                       subject:str,
+                       session:str,
+                       localizers: set,
+                       study_id:str,
+                    #    json_dict: defaultdict[list],
                        groupings: list[dict[str:set]]):
-    """
-    Read in all fmap JSON from the bids dir, and pair to a localizer.
+    
+    fmap_files = bids_layout.get(subject=subject, session=session, suffix="epi", datatype="fmap", extension="nii.gz")
+    if len(fmap_files) == 0:
+        exit_program_early("Could not find any fieldmap files for this subject and session.")
 
-    :param bids_path: path to BIDS-compliant .nii/.json files
-    :type bids_path: pathlib.Path
-    :param localizers: set of localizer IDs
-    :type localizers: set[int]
-    :param json_dict: dict with each key being a series number, each value being an object representation of it's JSON file with added 'bidsname' and 'filename' attributes
-    :type json_dict: defaultdict[list]
-    :param groupings: list of dictionaries containing mappings of localizers to series number
-    :type groupings: list[dict[str:set]]
-    """
-    bids_fmap_json = sorted(list(bids_path.glob("fmap/*.json")))
-    if len(bids_fmap_json) == 0:
-        exit_program_early("Could not find any JSON files from the fieldmap directory of the bids data.")
-    for jf in bids_fmap_json:
-        jd = None
-        with open(jf, "r") as j:
-            jd = json.load(j)
-        series_id = jd["SeriesNumber"]
-        jd["filename"] = str(jf)
-        acq_time = datetime.strptime(jd["AcquisitionTime"], "%H:%M:%S.%f")
-        json_dict[acq_time].append(jd)
-        direction = "fmapAP" if jd["PhaseEncodingDirection"] == "j-" else "fmapPA"
-        for i, dt in enumerate(localizers):
+    for epi_file in fmap_files:
+        if epi_file.entities["study_id"] != study_id:
+            continue
+
+        acq_time = datetime.strptime(epi_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
+        direction = f"fmap{epi_file.entities['direction']}"
+        for i, (dt, series_id) in enumerate(localizers):
             if i < len(localizers)-1:
-                if acq_time > dt and acq_time < localizers[i+1]:
-                    groupings[i][direction].add((series_id, acq_time))
+                if (acq_time > dt and acq_time < localizers[i+1][0]) and epi_file.entities["SeriesNumber"] > series_id:
+                    groupings[i][direction].add((epi_file, acq_time))
                     break
             else:
-                groupings[i][direction].add((series_id, acq_time))
+                groupings[i][direction].add((epi_file, acq_time))
 
 
 @debug_logging
-def map_fmap_to_func(xml_path: Path,
-                     bids_dir_path: Path):
-    """
-    Group field maps to BOLD task runs.
-
-    :param xml_path: path to XML generated by XNAT
-    :type xml_path: pathlib.Path
-    :param bids_dir_path: path to BIDS-compliant session directory
-    :type bids_dir_path: pathlib.Path
-    """
-    log_linebreak()
-    logger.info("####### Pairing field maps to functional runs #######\n")
-
+def map_fmap_to_func(subject:str,
+                     session:str,
+                     bids_path:Path,
+                     xml_path: Path):
+    
     if not xml_path.is_file():
         exit_program_early(f"Session xml file {xml_path} does not exist.")
-    if not bids_dir_path.is_dir():
-        exit_program_early(f"Session bids dicrectory {bids_dir_path} does not exist.")
-    series_json = defaultdict(list)
-
-    locals_series = get_locals_from_xml(xml_path=xml_path)
+    layout = BIDSLayout(bids_path, validate=False)
+    locals_series, study_id = get_locals_from_xml(xml_path=xml_path)
     logger.info(f"Localizers: {locals_series}")
 
     groups = [{"task":set(), "fmapAP": set(), "fmapPA": set()} for _ in locals_series]
-    get_func_from_bids(bids_path=bids_dir_path, 
-                       localizers=locals_series, 
-                       json_dict=series_json, 
+    get_func_from_bids(bids_layout=layout,
+                       subject=subject,
+                       session=session,
+                       localizers=locals_series,
+                       study_id=study_id,
                        groupings=groups)
-    get_fmap_from_bids(bids_path=bids_dir_path, 
-                       localizers=locals_series, 
-                       json_dict=series_json, 
+    
+    get_fmap_from_bids(bids_layout=layout,
+                       subject=subject,
+                       session=session,
+                       localizers=locals_series,
+                       study_id=study_id,
                        groupings=groups)
+    
     logger.info(f"Localizer groups: ") 
     for group_num, g in enumerate(groups):
         logger.info(f"\tgroup : {group_num}")
@@ -161,33 +137,33 @@ def map_fmap_to_func(xml_path: Path,
         fmap_times = []
 
         # get times for field maps
-        for i, ((ap_id, ap_acq_time), (pa_id, pa_acq_time)) in enumerate(fmap_pairs):
+        for i, ((ap_file, ap_acq_time), (pa_file, pa_acq_time)) in enumerate(fmap_pairs):
             times = sorted((ap_acq_time, pa_acq_time))
             fmap_times.append(times[0] + (abs(times[1] - times[0])/2))
-        
+
         # pair task runs with field maps based on closest Acquisition Time
         map_pairings = {s:[] for s in fmap_pairs}
-        for (t_id, t_acq_time) in group["task"]:
+        for (t_file, t_acq_time) in group["task"]:
             diff = list(map(lambda x: abs(x-t_acq_time), fmap_times))
             pairing = fmap_pairs[diff.index(min(diff))]
-            map_pairings[pairing].append(t_acq_time)
-        
+            map_pairings[pairing].append(t_file)
+
         # add the list of task run files that are paired with each field map in their json files
         pairing_strs = []
-        for (ap_tup, pa_tup), task_acq_times in map_pairings.items():
-            for fmap_acq, fmap_type in ((ap_tup[1], "ap"), (pa_tup[1],"pa")):
-                jd = series_json[fmap_acq][0]
-                fmap_file = jd.pop("filename")
-                jd["IntendedFor"] = []
-                task_series = set()
-                for t_acq in task_acq_times:
-                    for echo in series_json[t_acq]:
-                        jd["IntendedFor"].append(echo["bidsname"])
-                        task_series.add(str(echo["SeriesNumber"]))
-                pairing_strs.append((f"{fmap_type}:{jd['SeriesNumber']}", ' '.join(task_series)))
-                with open(fmap_file, "w") as out_file:
-                    logger.debug(f"writing field map pairing information to file: {fmap_file}")
+        for (ap_tup, pa_tup), task_files in map_pairings.items():
+            for fmap_file, fmap_type in ((ap_tup[0], "ap"), (pa_tup[0], "pa")):
+                fmap_json = [f for f in fmap_file.get_associations() if f.entities['extension'] == ".json"]
+                if len(fmap_json) != 1:
+                    exit_program_early(f"Cannot find the associated JSON file for fmap: {fmap_file.filename}")
+                fmap_json = fmap_json[0]
+                intended_for = [tf.relpath.split("/", 1)[-1] for tf in task_files]
+                task_series = set([f"{tf.filename}({str(tf.entities['SeriesNumber'])})" for tf in task_files])
+                jd = fmap_json.get_dict()
+                jd["IntendedFor"] = intended_for
+                with open(fmap_json.path, "w") as out_file:
+                    logger.debug(f"writing field map pairing information to file: {fmap_json.filename}")
                     out_file.write(json.dumps(jd, indent=4))
+                pairing_strs.append((f"{fmap_file.filename}:{jd['SeriesNumber']}", ' '.join(task_series)))
 
         # report the fieldmap pairings           
         if len(pairing_strs) > 0:            

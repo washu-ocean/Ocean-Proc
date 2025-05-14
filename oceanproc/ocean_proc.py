@@ -5,16 +5,14 @@ import sys
 from pathlib import Path
 import logging
 import datetime
-from .bids_wrapper import dicom_to_bids, remove_unusable_runs
+from .bids_wrapper import dicom_to_bids, remove_unusable_runs, extend_session
 from .group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
 from .preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts
 from .segmentation_wrapper import segmentation_args, segment_anatomical
 from .events_long import create_events_and_confounds
 from .utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option
 from .oceanparse import OceanParser
-import shlex
 import shutil
-from subprocess import Popen, PIPE
 from textwrap import dedent
 
 logging.basicConfig(level=logging.INFO,
@@ -61,6 +59,8 @@ def main():
                                    help="The path to the directory containing the raw DICOM files for this subject and session")
     session_arguments.add_argument("--xml_path", "-x", type=Path, required=True,
                                    help="The path to the xml file for this subject and session")
+    session_arguments.add_argument("--longitudinal", "-lg", type=Path, nargs=2, action="append",
+                                   help="Addtional sourcedata and xml pair to include with this BIDs subject and session")
     session_arguments.add_argument("--skip_dcm2bids", action="store_true",
                                    help="Flag to indicate that dcm2bids does not need to be run for this subject and session")
     session_arguments.add_argument("--skip_fmap_pairing", action="store_true",
@@ -71,11 +71,8 @@ def main():
                                    help="Flag to indicate that preprocessing does not need to be run for this subject and session")
     session_arguments.add_argument("--skip_event_files", action="store_true",
                                    help="Flag to indicate that the making of a long formatted events file is not needed for the subject and session")
-    # export_arg_opts = session_arguments.add_mutually_exclusive_group()
     session_arguments.add_argument("--export_args", "-ea", type=Path,
                                    help="Path to a file to save the current configuration arguments")
-    # export_arg_opts.add_argument("--export_args_plus", "-eap", type=Path,
-                                #    help="Path to a file to save the current configuration arguments as well as the extra preprocessing arguments.")
     session_arguments.add_argument("--keep_work_dir", action="store_true",
                                    help="Flag to stop the deletion of the fMRIPrep working directory")
     session_arguments.add_argument("--debug", action="store_true",
@@ -118,7 +115,7 @@ def main():
     config_arguments.add_argument("--bibsnet_image_path", "-bi", type=Path,
                                   help="Path to the BIBSnet apptainer image to use for segmentation. If provided, BIBSnet segmentation will be run and the outputs will be used for preprocessing. (Must be used with the '--infant' flag)")
     args, unknown_args = parser.parse_known_args()
-    breakpoint()
+
     try:
         assert args.derivs_path.is_dir(), "Derivatives directory must exist but it cannot be found"
         assert args.bids_path.is_dir(), "Raw Bids directory must exist but it cannot be found"
@@ -126,7 +123,7 @@ def main():
         assert args.work_dir.is_dir(), "Work directroy must exist but it cannot be found"
     except AssertionError as e:
         logger.exception(e)
-        exit_program_early(e)
+        parser.error(e)
 
     defaults = infant_defaults if args.infant else adult_defaults
     for k,v in defaults.__dict__.items():
@@ -141,8 +138,14 @@ def main():
             args.derivatives = [bibsnet_path]
         elif bibsnet_path not in args.derivatives:
             args.derivatives.append(bibsnet_path)
+
+    if args.longitudinal:
+        for source_dir, xml_file in args.longitudinal:
+            if not source_dir.is_dir():
+                parser.error(f"Cannot find the souredata directory at the path: {source_dir}")
+            elif (not xml_file.is_file()) or (xml_file.suffix != ".xml"):
+                parser.error(f"Cannot find the xml file at the path: {xml_file}")
             
-    breakpoint()
 
     ##### Export the current configuration arguments to a file #####
     if args.export_args:
@@ -154,7 +157,6 @@ def main():
             logger.exception(e)
             exit_program_early(e)
     
-    breakpoint()
 
     preproc_image = f"{defaults.image_name}:{args.image_version}"
     preproc_derivs_path = args.derivs_path / args.derivs_subfolder
@@ -168,6 +170,9 @@ def main():
         flags.debug = True
         logger.setLevel(logging.DEBUG)
     
+    if args.longitudinal:
+        flags.longitudinal = True
+    
 
     logger.info("Starting oceanproc...")
     logger.info(f"Log will be stored at {log_path}")
@@ -180,42 +185,60 @@ def main():
                                         subject=args.subject,
                                         session=args.session)
 
-    ##### Convert raw DICOMs to BIDS structure #####
-    if not args.skip_dcm2bids:
-        dicom_to_bids(
+    dicom_sessions = [(args.source_data, args.xml_path, args.bids_path)]
+    if flags.longitudinal:
+        for soure_dir, xml_file  in args.longitudinal:
+            dicom_sessions.append((soure_dir, xml_file, preproc_work_dir))
+
+    for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
+
+        ##### Convert raw DICOMs to BIDS structure #####
+        if not args.skip_dcm2bids:
+            dicom_to_bids(
+                subject=args.subject,
+                session=args.session,
+                source_dir=souredata_path,
+                bids_dir=bids_path,
+                xml_path=xml_data_path,
+                bids_config=args.bids_config,
+                nordic_config=args.nordic_config,
+                nifti=args.nifti,
+                skip_validate=args.skip_bids_validation,
+                skip_prompt = index > 0
+            )
+            if index > 0:
+                extend_session(subject=args.subject,
+                               session=args.session,
+                               tmp_dir=bids_path, 
+                               bids_dir=args.bids_path)
+
+        ##### Remove the scans marked as 'unusable' #####
+        remove_unusable_runs(
+            xml_file=xml_data_path,
+            bids_path=args.bids_path,
             subject=args.subject,
-            session=args.session,
-            source_dir=args.source_data,
-            bids_dir=args.bids_path,
-            xml_path=args.xml_path,
-            bids_config=args.bids_config,
-            nordic_config=args.nordic_config,
-            nifti=args.nifti,
-            skip_validate=args.skip_bids_validation
+            session=args.session
         )
 
-    ##### Remove the scans marked as 'unusable' #####
-    remove_unusable_runs(
-        xml_file=args.xml_path,
-        bids_data_path=args.bids_path,
-        subject=args.subject,
-        session=args.session
-    )
+        ##### Pair field maps to functional runs #####
+        if not args.anat_only and not args.skip_fmap_pairing:
+            if args.fmap_pairing_file:
+                continue
+            else:
+                map_fmap_to_func(
+                    subject=args.subject,
+                    session=args.session,
+                    bids_path=args.bids_path,
+                    xml_path=xml_data_path,
+                )
 
-    ##### Pair field maps to functional runs #####
-    bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
-
-    if not args.anat_only and not args.skip_fmap_pairing:
-        if args.fmap_pairing_file:
-            map_fmap_to_func_with_pairing_file(
-                bids_session_dir,
-                args.fmap_pairing_file
-            )
-        else:
-            map_fmap_to_func(
-                xml_path=args.xml_path,
-                bids_dir_path=bids_session_dir
-            )
+    ##### Pair field maps to functional runs with pairing file #####
+    if not args.anat_only and (not args.skip_fmap_pairing) and args.fmap_pairing_file:
+        bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
+        map_fmap_to_func_with_pairing_file(
+            bids_session_dir,
+            args.fmap_pairing_file
+        )
 
 
     ##### Run BIBSnet #####

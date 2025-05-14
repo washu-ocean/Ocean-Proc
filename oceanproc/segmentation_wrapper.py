@@ -3,21 +3,10 @@
 from pathlib import Path
 import logging
 from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess
-# from .fmriprep_wrapper import add_fd_plot_to_report
-import shlex
 import shutil
-from subprocess import Popen, PIPE
-from matplotlib import pyplot as plt
-from bs4 import BeautifulSoup as bsoup
 from pathlib import Path
-import pandas as pd
-import numpy as np
-import json
-import os
-import copy
 
 logger = logging.getLogger(__name__)
-plt.set_loglevel("warning")
 
 segmentation_args = {
     "start",
