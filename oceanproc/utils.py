@@ -2,6 +2,8 @@ import sys
 import logging
 from pathlib import Path
 import json
+from subprocess import Popen, PIPE
+import shlex
 from types import SimpleNamespace
 import nibabel as nib
 import nilearn.masking as nmask
@@ -13,7 +15,13 @@ logger = logging.getLogger(__name__)
 
 default_log_format = "%(levelname)s:%(asctime)s:%(module)s: %(message)s"
 
-flags = SimpleNamespace(debug = False)
+flags = SimpleNamespace(debug = False, longitudinal = False)
+
+bids_entities = ["sub", "ses", "sample", "task", "tracksys",
+                "acq", "ce", "trc", "stain", "rec", "dir",
+                "run", "mod", "echo", "flip", "inv", "mt",
+                "part", "proc", "hemi", "space", "split", "recording",
+                "chunk", "seg", "res", "den", "label", "desc"]
 
 def takes_arguments(decorator):
     """
@@ -85,6 +93,33 @@ def prompt_user_continue(msg:str) -> bool:
     logger.debug(f"User Response:  {user_continue} ({ans})")
     return ans
 
+def extract_options(option_chain:list) -> dict:
+    val = None
+    opts = dict()
+    key = None
+    if len(option_chain) < 1:
+        return opts
+    
+    if not (isinstance(option_chain[0], str) and option_chain[0].startswith("-")):
+        exit_program_early(f"cannot parse option chain: {option_chain}")
+
+    for o in option_chain:
+        if isinstance(o, str) and o.startswith("-"):
+            if key:
+                opts[key] = val
+            key = o.lstrip("-")
+            val = None
+        elif key:
+            if val is None:
+                val = o
+            elif isinstance(val, list):
+                val.append(o)
+            else:
+                val = [val, o]
+    else:
+        if key:
+            opts[key] = val
+    return opts
 
 def make_option(value, 
                 key: str=None, 
@@ -173,6 +208,22 @@ def prepare_subprocess_logging(this_logger,
                 h.terminator = ""
             this_logger = this_logger.parent
 
+@debug_logging
+def run_subprocess(cmd: str, title: str):
+    split_cmd = shlex.split(cmd)
+    logger.info(f"running '{title}' with the following command: \n{' '.join(split_cmd)}\n")
+    prepare_subprocess_logging(logger)
+    with Popen(split_cmd, stdout=PIPE, stderr=PIPE) as p:
+        while p.poll() == None:
+            for line in p.stdout:
+                logger.info(line.decode("utf-8", "ignore"))
+            for line in p.stderr:
+                logger.info(line.decode("utf-8", "ignore"))
+        prepare_subprocess_logging(logger, stop=True)
+        p.kill()
+        if p.poll() != 0:
+            raise RuntimeError(f"process -'{title}'- has ended with a non-zero exit code.")
+
 
 def log_linebreak():
     """
@@ -196,7 +247,8 @@ def log_linebreak():
 @debug_logging
 def export_args_to_file(args, 
                         argument_group, 
-                        file_path: Path):
+                        file_path: Path,
+                        extra_args:dict=None):
     """
     Takes the arguments in the argument group, and exports their names and values in the 'args'
     namespace to a file specified at 'file_path'. The input 'file_path' can either be a txt
@@ -216,11 +268,21 @@ def export_args_to_file(args,
         if a.dest in all_opts and all_opts[a.dest]:
             if type(all_opts[a.dest]) == bool:
                 opts_to_save[a.option_strings[0]] = ""
-                continue
             elif isinstance(all_opts[a.dest], Path):
                 opts_to_save[a.option_strings[0]] = str(all_opts[a.dest].resolve())
+            elif isinstance(all_opts[a.dest], list):
+                opts_to_save[a.option_strings[0]] = [v if isinstance(v, int) or isinstance(v, str) else str(v) for v in all_opts[a.dest]]
+            else:
+                opts_to_save[a.option_strings[0]] = all_opts[a.dest]
+
+    if extra_args:
+        for key, val in extra_args.items():
+            opt_key = make_option(True, key).strip()
+            if not val:
+                opts_to_save[opt_key] = ""
                 continue
-            opts_to_save[a.option_strings[0]] = all_opts[a.dest]
+            opts_to_save[opt_key] = val
+
     with open(file_path, "w") as f:
         if file_path.suffix == ".json":
             f.write(json.dumps(opts_to_save, indent=4))

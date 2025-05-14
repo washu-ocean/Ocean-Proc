@@ -5,15 +5,14 @@ import sys
 from pathlib import Path
 import logging
 import datetime
-from .bids_wrapper import dicom_to_bids, remove_unusable_runs
+from .bids_wrapper import dicom_to_bids, remove_unusable_runs, extend_session
 from .group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
-from .fmriprep_wrapper import process_data
+from .preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts
+from .segmentation_wrapper import segmentation_args, segment_anatomical
 from .events_long import create_events_and_confounds
-from .utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak
+from .utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option
 from .oceanparse import OceanParser
-import shlex
 import shutil
-from subprocess import Popen, PIPE
 from textwrap import dedent
 
 logging.basicConfig(level=logging.INFO,
@@ -46,10 +45,11 @@ def main():
         description="Ocean Labs adult MRI preprocessing",
         exit_on_error=False,
         fromfile_prefix_chars="@",
-        epilog="An arguments file can be accepted with @FILEPATH"
+        epilog="An arguments file can be accepted with @FILEPATH.\nAny additional arguments not listed in the help message will be passed to the preprocessing subprocess."
     )
     session_arguments = parser.add_argument_group("Session Specific")
     config_arguments = parser.add_argument_group("Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
+    parser.register("type", "Full-Path", lambda p: Path(p).resolve())
 
     session_arguments.add_argument("--subject", "-su", required=True,
                                    help="The identifier of the subject to preprocess")
@@ -59,12 +59,16 @@ def main():
                                    help="The path to the directory containing the raw DICOM files for this subject and session")
     session_arguments.add_argument("--xml_path", "-x", type=Path, required=True,
                                    help="The path to the xml file for this subject and session")
+    session_arguments.add_argument("--longitudinal", "-lg", type=Path, nargs=2, action="append",
+                                   help="Addtional sourcedata and xml pair to include with this BIDs subject and session")
     session_arguments.add_argument("--skip_dcm2bids", action="store_true",
                                    help="Flag to indicate that dcm2bids does not need to be run for this subject and session")
     session_arguments.add_argument("--skip_fmap_pairing", action="store_true",
                                    help="Flag to indicate that the pairing of fieldmaps to BOLD runs does not need to be performed for this subject and session")
-    session_arguments.add_argument("--skip_fmriprep", action="store_true",
-                                   help="Flag to indicate that fMRIPrep does not need to be run for this subject and session")
+    session_arguments.add_argument("--skip_segmentation", action="store_true",
+                                   help="Flag to indicate that segmentation does not need to be run for this subject and session")
+    session_arguments.add_argument("--skip_preproc", action="store_true",
+                                   help="Flag to indicate that preprocessing does not need to be run for this subject and session")
     session_arguments.add_argument("--skip_event_files", action="store_true",
                                    help="Flag to indicate that the making of a long formatted events file is not needed for the subject and session")
     session_arguments.add_argument("--export_args", "-ea", type=Path,
@@ -73,36 +77,45 @@ def main():
                                    help="Flag to stop the deletion of the fMRIPrep working directory")
     session_arguments.add_argument("--debug", action="store_true",
                                    help="Flag to run the program in debug mode for more verbose logging")
-    session_arguments.add_argument("--fmap_pairing_file",
-                                   help="Path to JSON containing info on how to pair fieldmaps to BOLD runs.",
-                                   type=Path)
+    session_arguments.add_argument("--fmap_pairing_file", type=Path,
+                                   help="Path to JSON containing info on how to pair fieldmaps to BOLD runs.")
 
     config_arguments.add_argument("--bids_path", "-b", type=Path, required=True,
                                   help="The path to the directory containing the raw nifti data for all subjects, in BIDS format")
     config_arguments.add_argument("--derivs_path", "-d", type=Path, required=True,
                                   help="The path to the BIDS formated derivatives directory for this subject")
-    config_arguments.add_argument("--derivs_subfolder", "-ds", default="fmriprep",
-                                  help="The subfolder in the derivatives directory where bids style outputs should be stored. The default is 'fmriprep'.")
+    config_arguments.add_argument("--derivs_subfolder", "-ds", default=None,
+                                  help=f"""The subfolder in the derivatives directory where bids style outputs should be stored. 
+                                  The default is {adult_defaults.derivs_subfolder} or {infant_defaults.derivs_subfolder} if the '--infant' flag is set.""")
     config_arguments.add_argument("--bids_config", "-c", type=Path, required=True,
                                   help="The path to the dcm2bids config file to use for this subject and session")
     config_arguments.add_argument("--nordic_config", "-n", type=Path,
                                   help="The path to the second dcm2bids config file to use for this subject and session. This implies that the session contains NORDIC data")
     config_arguments.add_argument("--nifti", action=argparse.BooleanOptionalAction,
                                   help="Flag to specify that the source directory contains files of type NIFTI (.nii/.jsons) instead of DICOM")
-    config_arguments.add_argument("--anat_only", action='store_true',
+    config_arguments.add_argument("--anat_only", action=argparse.BooleanOptionalAction,
                                   help="Flag to specify only anatomical images should be processed.")
     config_arguments.add_argument("--fd_spike_threshold", "-fd", type=float, default=0.9,
                                   help="framewise displacement threshold (in mm) to determine outlier framee (Default is 0.9).")
-    config_arguments.add_argument("--skip_bids_validation", action="store_true",
+    config_arguments.add_argument("--skip_bids_validation", action=argparse.BooleanOptionalAction,
                                   help="Specifies skipping BIDS validation (only enabled for fMRIprep step)")
     config_arguments.add_argument("--fs_subjects_dir", "-fs", type=Path,
                                   help="The path to the directory that contains previous FreeSurfer outputs/derivatives to use for fMRIPrep. If empty, this is the path where new FreeSurfer outputs will be stored.")
+    config_arguments.add_argument("--precomputed_derivatives", "-pd", type="Full-Path", dest="derivatives", nargs="*",
+                                  help="A list of paths to any BIDS-style precomputed derivatives that should be used in preprocessing. (Ex. /path/to/bibsnet)")
     config_arguments.add_argument("--work_dir", "-w", type=Path, required=True,
                                   help="The path to the working directory used to store intermediate files")
     config_arguments.add_argument("--fs_license", "-l", type=Path, required=True,
                                   help="The path to the license file for the local installation of FreeSurfer")
-    config_arguments.add_argument("--fmriprep_version", "-fv", default="23.1.4", dest="image",
-                                  help="The version of fmriprep to use. The default is 23.1.4. It is reccomended that an entire study use the same version.")
+    config_arguments.add_argument("--image_version", "-iv", default=None,
+                                  help=f"""The version of fmriprep to use; It is reccomended that an entire study use the same version. 
+                                  The default is {adult_defaults.image_version} or {infant_defaults.image_version} if the '--infant' flag is set.""")
+    config_arguments.add_argument("--infant", "-I", action=argparse.BooleanOptionalAction,
+                                  help="Flag to specify that NiBabies should be used instead of fMRIPrep")
+    config_arguments.add_argument("--bibsnet_image_path", "-bi", type=Path,
+                                  help="Path to the BIBSnet apptainer image to use for segmentation. If provided, BIBSnet segmentation will be run and the outputs will be used for preprocessing. (Must be used with the '--infant' flag)")
+    config_arguments.add_argument("--bibsnet_work", "-bw", type=Path,
+                                  help="The path to the working directory used to store intermediate files for BIBSnet")
     args, unknown_args = parser.parse_known_args()
 
     try:
@@ -112,23 +125,48 @@ def main():
         assert args.work_dir.is_dir(), "Work directroy must exist but it cannot be found"
     except AssertionError as e:
         logger.exception(e)
-        exit_program_early(e)
+        parser.error(e)
+
+    defaults = infant_defaults if args.infant else adult_defaults
+    for k,v in defaults.__dict__.items():
+        if k in args.__dict__ and args.__dict__[k] is None:
+            args.__dict__[k] = v
+
+    unknown_args = extract_options(unknown_args)
+
+    bibsnet_path = (args.derivs_path / "bibsnet").resolve()
+    if args.infant and args.bibsnet_image_path:
+        if args.derivatives is None:
+            args.derivatives = [bibsnet_path]
+        elif bibsnet_path not in args.derivatives:
+            args.derivatives.append(bibsnet_path)
+    
+    if args.bibsnet_work and (not args.bibsnet_work.exists()):
+        parser.error("BIBSnet working directory must exist but it cannot be found")
+
+    if args.longitudinal:
+        for source_dir, xml_file in args.longitudinal:
+            if not source_dir.is_dir():
+                parser.error(f"Cannot find the souredata directory at the path: {source_dir}")
+            elif (not xml_file.is_file()) or (xml_file.suffix != ".xml"):
+                parser.error(f"Cannot find the xml file at the path: {xml_file}")
+            
 
     ##### Export the current configuration arguments to a file #####
     if args.export_args:
         try:
             assert args.export_args.parent.exists() and args.export_args.suffix, "Argument export path must be a file path in a directory that exists"
             logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######")
-            export_args_to_file(args, config_arguments, args.export_args)
+            export_args_to_file(args, config_arguments, args.export_args, extra_args=unknown_args)
         except Exception as e:
             logger.exception(e)
             exit_program_early(e)
+    
 
-    args.image = f"nipreps/fmriprep:{args.image}"
+    preproc_image = f"{defaults.image_name}:{args.image_version}"
+    preproc_derivs_path = args.derivs_path / args.derivs_subfolder
 
-    args.derivs_path = args.derivs_path / args.derivs_subfolder
-
-    log_dir = args.derivs_path / f"sub-{args.subject}/log"
+    log_dir = preproc_derivs_path / f"sub-{args.subject}/log"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"sub-{args.subject}_ses-{args.session}_oceanproc_desc-{datetime.datetime.now().strftime('%m-%d-%y_%I-%M%p')}.log"
     add_file_handler(logger, log_path)
@@ -136,6 +174,10 @@ def main():
     if args.debug:
         flags.debug = True
         logger.setLevel(logging.DEBUG)
+    
+    if args.longitudinal:
+        flags.longitudinal = True
+    
 
     logger.info("Starting oceanproc...")
     logger.info(f"Log will be stored at {log_path}")
@@ -144,72 +186,118 @@ def main():
     for k,v in (dict(args._get_kwargs())).items():
         logger.info(f" {k} : {v}")
 
-    args.work_dir = make_work_directory(dir_path=args.work_dir,
+    preproc_work_dir = make_work_directory(dir_path=args.work_dir,
                                         subject=args.subject,
                                         session=args.session)
+    bibsnet_work_dir = args.bibsnet_work if args.bibsnet_work else args.work_dir
 
-    ##### Convert raw DICOMs to BIDS structure #####
-    if not args.skip_dcm2bids:
-        dicom_to_bids(
+    dicom_sessions = [(args.source_data, args.xml_path, args.bids_path)]
+    if flags.longitudinal:
+        for soure_dir, xml_file  in args.longitudinal:
+            dicom_sessions.append((soure_dir, xml_file, preproc_work_dir))
+
+    for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
+        ##### Convert raw DICOMs to BIDS structure #####
+        if not args.skip_dcm2bids:
+            dicom_to_bids(
+                subject=args.subject,
+                session=args.session,
+                source_dir=souredata_path,
+                bids_dir=bids_path,
+                xml_path=xml_data_path,
+                bids_config=args.bids_config,
+                nordic_config=args.nordic_config,
+                nifti=args.nifti,
+                skip_validate=args.skip_bids_validation,
+                skip_prompt = index > 0
+            )
+            if index > 0:
+                extend_session(subject=args.subject,
+                               session=args.session,
+                               tmp_dir=bids_path, 
+                               bids_dir=args.bids_path)
+                
+
+    for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
+        ##### Remove the scans marked as 'unusable' #####
+        remove_unusable_runs(
+            xml_file=xml_data_path,
+            bids_path=args.bids_path,
             subject=args.subject,
-            session=args.session,
-            source_dir=args.source_data,
-            bids_dir=args.bids_path,
-            xml_path=args.xml_path,
-            bids_config=args.bids_config,
-            nordic_config=args.nordic_config,
-            nifti=args.nifti,
-            skip_validate=args.skip_bids_validation
+            session=args.session
         )
 
-    ##### Remove the scans marked as 'unusable' #####
-    remove_unusable_runs(
-        xml_file=args.xml_path,
-        bids_data_path=args.bids_path,
-        subject=args.subject,
-        session=args.session
-    )
+        ##### Pair field maps to functional runs #####
+        if not args.anat_only and not args.skip_fmap_pairing:
+            if args.fmap_pairing_file:
+                continue
+            else:
+                map_fmap_to_func(
+                    subject=args.subject,
+                    session=args.session,
+                    bids_path=args.bids_path,
+                    xml_path=xml_data_path,
+                )
 
-    ##### Pair field maps to functional runs #####
-    bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
+    ##### Pair field maps to functional runs with pairing file #####
+    if not args.anat_only and (not args.skip_fmap_pairing) and args.fmap_pairing_file:
+        bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
+        map_fmap_to_func_with_pairing_file(
+            bids_session_dir,
+            args.fmap_pairing_file
+        )
 
-    if not args.anat_only and not args.skip_fmap_pairing:
-        if args.fmap_pairing_file:
-            map_fmap_to_func_with_pairing_file(
-                bids_session_dir,
-                args.fmap_pairing_file
-            )
-        else:
-            map_fmap_to_func(
-                xml_path=args.xml_path,
-                bids_dir_path=bids_session_dir
-            )
 
-    ##### Run fMRIPrep #####
-    all_opts = dict(args._get_kwargs())
-    fmrip_options = {"work_dir",
-                     "fs_license",
-                     "fs_subjects_dir",
-                     "skip_bids_validation",
-                     "fd_spike_threshold",
-                     "anat_only",
-                     "image"}
+    ##### Run BIBSnet #####
+    bibsnet_args = {key:unknown_args[key] for key in segmentation_args if key in unknown_args}
+    for key in segmentation_args:
+        if key in unknown_args:
+            del unknown_args[key]
 
-    if not args.skip_fmriprep:
-        process_data(
+    if args.infant and args.bibsnet_image_path and (not args.skip_segmentation):
+        segment_anatomical(
             subject=args.subject,
             session=args.session,
             bids_path=args.bids_path,
             derivs_path=args.derivs_path,
-            remove_work_folder=None if args.keep_work_dir else args.work_dir,
-            **{o:all_opts[o] for o in fmrip_options}
+            work_path=bibsnet_work_dir,
+            bibsnet_image=args.bibsnet_image_path,
+            remove_work_folder=False,
+            **bibsnet_args
+        )
+
+        if not bibsnet_path.exists():
+            exit_program_early(f"Cannot find the outputs for BIBSnet at the path {bibsnet_path}")
+    
+
+    ##### Run fMRIPrep or NiBabies #####
+    all_opts = dict(args._get_kwargs())
+
+    additional_mounts = {make_option(True, mo, convert_underscore=True).strip():all_opts[mo] for mo in mount_opts if all_opts[mo]}
+    fmrip_options = {"skip_bids_validation",
+                     "fd_spike_threshold",
+                     "anat_only"}
+
+    if not args.skip_preproc:
+        process_data(
+            subject=args.subject,
+            session=args.session,
+            bids_path=args.bids_path,
+            derivs_path=preproc_derivs_path,
+            work_path=preproc_work_dir,
+            license_file=args.fs_license,
+            image_name=preproc_image,
+            additional_mounts=additional_mounts,
+            remove_work_folder=not args.keep_work_dir,
+            is_infant=args.infant,
+            **({o:all_opts[o] for o in fmrip_options} | unknown_args)
         )
 
     ##### Create long formatted event files #####
     if not args.skip_event_files:
         create_events_and_confounds(
             bids_path=args.bids_path,
-            derivs_path=args.derivs_path,
+            derivs_path=preproc_derivs_path,
             sub=args.subject,
             ses=args.session,
             fd_thresh=args.fd_spike_threshold

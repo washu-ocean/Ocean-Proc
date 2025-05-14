@@ -2,12 +2,9 @@ import pandas as pd
 import numpy as np
 import nibabel as nib
 import json
-import os
-from .utils import exit_program_early, debug_logging, log_linebreak, load_data
-from glob import glob
+from .utils import exit_program_early, debug_logging, log_linebreak
 from pathlib import Path
 import logging
-import numpy.typing as npt
 
 logger = logging.getLogger(__name__)
 
