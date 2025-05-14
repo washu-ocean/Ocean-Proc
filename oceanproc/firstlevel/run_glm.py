@@ -577,6 +577,8 @@ def main():
                                   help="A list of confounds to include from each confound timeseries tsv file.")
     config_arguments.add_argument("--fd_threshold", "-fd", type=float, default=0.9,
                                   help="The framewise displacement threshold used when censoring high-motion frames")
+    config_arguments.add_argument("--minimum_unmasked_neighbors", type=int, default=None,
+                                  help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
     # Add tmask flag
     config_arguments.add_argument("--repetition_time", "-tr", type=float,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
@@ -808,7 +810,18 @@ def main():
             if args.fd_censoring:
                 logger.info(f" censoring timepoints using a high motion mask with a framewise displacement threshold of {args.fd_threshold}")
                 confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
-                fd_mask = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask] < args.fd_threshold
+                fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
+                if args.minimum_unmasked_neighbors:
+                    fd_arr_padded = np.pad(fd_arr, pad_width := args.minimum_unmasked_neighbors)
+                    fd_mask = np.full(fd_arr_padded.shape, False)
+                    for i in range(pad_width, len(fd_arr_padded) - pad_width):
+                        if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < args.fd_threshold):
+                            fd_mask[i] = True
+                        else:
+                            fd_mask[i] = False
+                    fd_mask = fd_mask[pad_width:-pad_width]
+                else:
+                    fd_mask = fd_arr < args.fd_threshold
                 run_mask &= fd_mask
                 logger.info(f" a total of {np.sum(~run_mask)} timepoints will be censored with this framewise displacement threshold")
                 frame_retention_percent = (np.sum(run_mask) / run_mask.shape[0]) * 100
@@ -864,7 +877,18 @@ def main():
                 if args.nuisance_fd:
                     logger.info(f" censoring timepoints for nuisance regression using the framewise displacement threshold of {args.nuisance_fd}")
                     confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
-                    nuisance_fd_mask = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask] < args.nuisance_fd
+                    nuisance_fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
+                    if args.minimum_unmasked_neighbors:
+                        nuisance_fd_arr_padded = np.pad(nuisance_fd_arr, pad_width := args.minimum_unmasked_neighbors)
+                        nuisance_fd_mask = np.full(nuisance_fd_arr_padded.shape, False)
+                        for i in range(pad_width, len(nuisance_fd_arr_padded) - pad_width):
+                            if all(nuisance_fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < args.nuisance_fd):
+                                nuisance_fd_mask[i] = True
+                            else:
+                                nuisance_fd_mask[i] = False
+                        nuisance_fd_mask = nuisance_fd_mask[pad_width:-pad_width]
+                    else:
+                        nuisance_fd_mask = nuisance_fd_arr < args.nuisance_fd
                     nuisance_mask &= nuisance_fd_mask
                     logger.info(f" a total of {np.sum(~nuisance_mask)} timepoints will be censored with this nuisance framewise displacement threshold")
                 
