@@ -114,6 +114,8 @@ def main():
                                   help="Flag to specify that NiBabies should be used instead of fMRIPrep")
     config_arguments.add_argument("--bibsnet_image_path", "-bi", type=Path,
                                   help="Path to the BIBSnet apptainer image to use for segmentation. If provided, BIBSnet segmentation will be run and the outputs will be used for preprocessing. (Must be used with the '--infant' flag)")
+    config_arguments.add_argument("--bibsnet_work", "-bw", type=Path,
+                                  help="The path to the working directory used to store intermediate files for BIBSnet")
     args, unknown_args = parser.parse_known_args()
 
     try:
@@ -138,6 +140,9 @@ def main():
             args.derivatives = [bibsnet_path]
         elif bibsnet_path not in args.derivatives:
             args.derivatives.append(bibsnet_path)
+    
+    if args.bibsnet_work and (not args.bibsnet_work.exists()):
+        parser.error("BIBSnet working directory must exist but it cannot be found")
 
     if args.longitudinal:
         for source_dir, xml_file in args.longitudinal:
@@ -184,6 +189,7 @@ def main():
     preproc_work_dir = make_work_directory(dir_path=args.work_dir,
                                         subject=args.subject,
                                         session=args.session)
+    bibsnet_work_dir = args.bibsnet_work if args.bibsnet_work else args.work_dir
 
     dicom_sessions = [(args.source_data, args.xml_path, args.bids_path)]
     if flags.longitudinal:
@@ -191,7 +197,6 @@ def main():
             dicom_sessions.append((soure_dir, xml_file, preproc_work_dir))
 
     for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
-
         ##### Convert raw DICOMs to BIDS structure #####
         if not args.skip_dcm2bids:
             dicom_to_bids(
@@ -211,7 +216,9 @@ def main():
                                session=args.session,
                                tmp_dir=bids_path, 
                                bids_dir=args.bids_path)
+                
 
+    for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
         ##### Remove the scans marked as 'unusable' #####
         remove_unusable_runs(
             xml_file=xml_data_path,
@@ -253,7 +260,7 @@ def main():
             session=args.session,
             bids_path=args.bids_path,
             derivs_path=args.derivs_path,
-            work_path=args.work_dir,
+            work_path=bibsnet_work_dir,
             bibsnet_image=args.bibsnet_image_path,
             remove_work_folder=False,
             **bibsnet_args

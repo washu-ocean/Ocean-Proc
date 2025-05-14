@@ -75,7 +75,7 @@ def run_preprocessing(subject:str,
     :raise RuntimeError: If fmriprep throws an error, or exits with a non-zero exit code.
     """
     def clean_up(): return shutil.rmtree(work_path) if remove_work_folder else None
-    breakpoint()
+   
     log_linebreak()
     logger.info(f"####### Starting {title} #######\n")
     if not bids_path.exists():
@@ -109,10 +109,10 @@ def run_preprocessing(subject:str,
     derivs_mount = "/out"
     work_mount = "/work"
     preproc_command = f"""docker run --rm -it -u {uid}:{gid}
-                            -v {license_file}:{license_mount}:ro
-                            -v {bids_path}:{bids_mount}:ro
-                            -v {derivs_path}:{derivs_mount}
-                            -v {work_path}:{work_mount}
+                            -v {license_file.resolve()}:{license_mount}:ro
+                            -v {bids_path.resolve()}:{bids_mount}:ro
+                            -v {derivs_path.resolve()}:{derivs_mount}
+                            -v {work_path.resolve()}:{work_mount}
                             {additional_mount_paths}
                             {image_name} {bids_mount} {derivs_mount} participant
                             --participant-label {subject} 

@@ -115,7 +115,7 @@ def segment_anatomical(subject:str,
     :param **kwargs: any arguments to be passed to the fmriprep subprocess
     """
     option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
-    breakpoint()
+
     run_bibsnet(subject=subject,
                       session=session,
                       bids_path=bids_path,

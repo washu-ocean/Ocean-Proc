@@ -118,7 +118,7 @@ def run_dcm2bids(subject:str,
     title = "dcm2bids"
 
     if shutil.which('dcm2bids') is None:
-        exit_program_early("Cannot locate program 'dcm2bids', make sure it is in your PATH.")
+        exit_program_early(f"Cannot locate program '{title}', make sure it is in your PATH.")
 
     helper_command = f"""{shutil.which('dcm2bids')}
                     {'--bids_validate' if skip_validate is False else ''}
@@ -160,7 +160,7 @@ def run_dcm2bids(subject:str,
     except RuntimeError or subprocess.CalledProcessError as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early("Problem running 'dcm2bids'.")
+        exit_program_early(f"Problem running '{title}'.")
 
 
 @debug_logging
@@ -175,11 +175,12 @@ def run_dcm2niix(source_dir:Path,
     :param tmp_nifti_dir: Path to the directory to store the newly made NIFTI files
     :type tmp_nifti_dir: pathlib.Path
     """
+    title = "dcm2niix"
 
     if not source_dir.exists():
         exit_program_early(f"Path {source_dir} does not exist.")
     elif shutil.which('dcm2niix') is None:
-        exit_program_early("Cannot locate program 'dcm2niix', make sure it is in your PATH.")
+        exit_program_early(f"Cannot locate program '{title}', make sure it is in your PATH.")
 
     if not tmp_nifti_dir.exists():
         tmp_nifti_dir.mkdir(parents=True)
@@ -195,11 +196,11 @@ def run_dcm2niix(source_dir:Path,
     try:
         log_linebreak()
         logger.info("####### Converting DICOM files into NIFTI #######\n")
-        run_subprocess(helper_command, title='dcm2niix')
+        run_subprocess(helper_command, title=title)
     except RuntimeError or subprocess.CalledProcessError as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early("Problem running 'dcm2niix'.",
+        exit_program_early(f"Problem running '{title}'.",
                            exit_func=clean_up_func if clean_up_func else None)
 
     # Delete or move extra files from short runs

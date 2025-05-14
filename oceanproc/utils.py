@@ -282,7 +282,7 @@ def export_args_to_file(args,
                 opts_to_save[opt_key] = ""
                 continue
             opts_to_save[opt_key] = val
-    breakpoint()
+
     with open(file_path, "w") as f:
         if file_path.suffix == ".json":
             f.write(json.dumps(opts_to_save, indent=4))
