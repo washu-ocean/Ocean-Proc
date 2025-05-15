@@ -190,7 +190,7 @@ def map_fmap_to_func_with_pairing_file(bids_dir_path: Path,
         func_paths = []
         for func in pairing["func"]:
             func_paths.extend(
-                [str(p) for p in bids_dir_path.parent.glob(f"*/func/*{func}*nii.gz")]
+                [str(p.relative_to(bids_dir_path.parent)) for p in bids_dir_path.parent.glob(f"*/func/*{func}*nii.gz")]
             )
         for fmap_json in fmap_jsons:
             with fmap_json.open() as f:

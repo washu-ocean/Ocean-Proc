@@ -174,9 +174,10 @@ def main():
     if args.debug:
         flags.debug = True
         logger.setLevel(logging.DEBUG)
-    
     if args.longitudinal:
         flags.longitudinal = True
+    if args.infant:
+        flags.infant = True
     
 
     logger.info("Starting oceanproc...")
@@ -254,7 +255,7 @@ def main():
         if key in unknown_args:
             del unknown_args[key]
 
-    if args.infant and args.bibsnet_image_path and (not args.skip_segmentation):
+    if flags.infant and args.bibsnet_image_path and (not args.skip_segmentation):
         segment_anatomical(
             subject=args.subject,
             session=args.session,
@@ -289,7 +290,6 @@ def main():
             image_name=preproc_image,
             additional_mounts=additional_mounts,
             remove_work_folder=not args.keep_work_dir,
-            is_infant=args.infant,
             **({o:all_opts[o] for o in fmrip_options} | unknown_args)
         )
 
