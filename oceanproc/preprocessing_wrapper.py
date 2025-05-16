@@ -7,7 +7,6 @@ import shutil
 from subprocess import Popen, PIPE
 from matplotlib import pyplot as plt
 from bs4 import BeautifulSoup as bsoup
-from pathlib import Path
 import pandas as pd
 import numpy as np
 import json
@@ -72,7 +71,7 @@ def run_preprocessing(subject:str,
     :type option_chain: str
     :param remove_work_folder: Flag to indicate if the work_path should be deleted (default True)
     :type remove_work_folder: bool
-    :raise RuntimeError: If fmriprep throws an error, or exits with a non-zero exit code.
+    :raise RuntimeError: If preprocessing throws an error, or exits with a non-zero exit code.
     """
     def clean_up(): return shutil.rmtree(work_path) if remove_work_folder else None
    
@@ -135,9 +134,10 @@ def run_preprocessing(subject:str,
 @debug_logging
 def add_fd_plot_to_report(subject:str,
                           session:str,
-                          derivs_path:Path):
+                          derivs_path:Path,
+                          title:str):
     """
-    Reads each confounds file in the fmriprep functional output, plots the framewise
+    Reads each confounds file in the preprocessing functional output, plots the framewise
     displacement, and adds this figure into the output report
 
     :param subject: Name of subject (ex. if path contains 'sub-5000', subject='5000')
@@ -150,16 +150,16 @@ def add_fd_plot_to_report(subject:str,
 
     func_path = derivs_path / f"sub-{subject}" / f"ses-{session}" / "func"
     figures_path = derivs_path / f"sub-{subject}" / "figures"
-    report_path = derivs_path / f"sub-{subject}.html"
+    report_path = derivs_path / f"sub-{subject}{f'_ses-{session}' if flags.infant else ''}.html"
 
     for p in [func_path, figures_path, report_path]:
         if not p.exists():
             exit_program_early(f"Expected Path {str(p)} does not exist.")
 
     log_linebreak()
-    logger.info("####### Appending FD Plots to fMRIPrep Report #######\n")
+    logger.info(f"####### Appending FD Plots to {title} Report #######\n")
 
-    logger.debug(f"parsing the fMRIPrep html report file: {report_path}")
+    logger.debug(f"parsing the {title} html report file: {report_path}")
     report_file = open(report_path, "r")
     soup = bsoup(report_file.read(), 'html.parser')
     report_file.close()
@@ -168,6 +168,7 @@ def add_fd_plot_to_report(subject:str,
         logger.info(f"plotting framewise displacement from confounds file:{f}")
         try:
             run = f.name.split("run-")[-1].split("_")[0]
+            html_run = int(run) if flags.infant else run
             task = f.name.split("task-")[-1].split("_")[0]
 
             # read the repetition time from the json files for the BOLD data
@@ -201,7 +202,7 @@ def add_fd_plot_to_report(subject:str,
             logger.debug(f" saved the fd plot figure for run-{run} to path: {plot_path}")
 
             # find the location in the report where the new figure will go
-            confounds_plot_div = soup.find(id=lambda x: (f"desc-carpetplot_run-{run}" in x) if x else False)
+            confounds_plot_div = soup.find(id=lambda x: ((f"desc-carpetplot" in x) and (f"run-{html_run}" in x)) if x else False)
 
             # Copy a div element from the report and add the new figure into it
             fd_plot_div = copy.copy(confounds_plot_div)
@@ -212,16 +213,24 @@ def add_fd_plot_to_report(subject:str,
             fd_plot_div.img["src"] = "./" + rel_path
 
             # find the reference div for the copied div element and make a copy of this as well
-            confounds_plot_reference_div = confounds_plot_div.find_next_sibling("div", class_="elem-filename")
+            if flags.infant:
+                fd_plot_reference_div = fd_plot_div.small
+                fd_plot_reference_div.a["href"] = "./" + rel_path
+                fd_plot_reference_div.a.string = rel_path
 
-            fd_plot_reference_div = copy.copy(confounds_plot_reference_div)
-            fd_plot_reference_div.a["href"] = "./" + rel_path
-            fd_plot_reference_div.a.string = rel_path
+                # Add the new elements into the file
+                logger.debug(f" inserting the new html elements into the {title} report")
+                confounds_plot_div.insert_after(fd_plot_div)
+            else: 
+                confounds_plot_reference_div = confounds_plot_div.find_next_sibling("div", class_="elem-filename")
+                fd_plot_reference_div = copy.copy(confounds_plot_reference_div)
+                fd_plot_reference_div.a["href"] = "./" + rel_path
+                fd_plot_reference_div.a.string = rel_path
 
-            # Add the new elements into the file
-            logger.debug(f" inserting the new html elements into the fMRIPrep report")
-            confounds_plot_reference_div.insert_after(fd_plot_div)
-            fd_plot_div.insert_after(fd_plot_reference_div)
+                # Add the new elements into the file
+                logger.debug(f" inserting the new html elements into the {title} report")
+                confounds_plot_reference_div.insert_after(fd_plot_div)
+                fd_plot_div.insert_after(fd_plot_reference_div)
         except Exception as e:
             logger.warning(f"Error generating the scaled FD plot for confound file: {f}")
 
@@ -241,10 +250,9 @@ def process_data(subject:str,
                  image_name:str,
                  additional_mounts:dict[str, Path],
                  remove_work_folder:bool,
-                 is_infant:bool=False,
                  **kwargs):
     """
-    Faciliates the running of nibabies and any additions to the output report.
+    Faciliates the running of preprocessing and any additions to the output report.
 
     :param subject: Name of subject (ex. if path contains 'sub-5000', subject='5000')
     :type subject: str
@@ -262,7 +270,7 @@ def process_data(subject:str,
     :type license_file: Path
     :param remove_work_folder: Path to the working directory that will be deleted upon completion or error (default None)
     :type remove_work_folder: str
-    :param **kwargs: any arguments to be passed to the fmriprep subprocess
+    :param **kwargs: any arguments to be passed to the preprocessing subprocess
     """
 
     # Add in some recommended options
@@ -276,21 +284,22 @@ def process_data(subject:str,
             kwargs[key] = val
 
 
-    fmriprep_option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
+    option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
+    preproc_title = "NiBabies" if flags.infant else "fMRIPrep"
 
     run_preprocessing(subject=subject,
-                      session=session if is_infant else None,
+                      session=session if flags.infant else None,
                       bids_path=bids_path,
                       derivs_path=derivs_path,
                       work_path=work_path,
                       license_file=license_file,
                       image_name=image_name,
-                      title="NiBabies" if is_infant else "fMRIPrep",
-                      option_chain=fmriprep_option_chain,
+                      title=preproc_title,
+                      option_chain=option_chain,
                       additional_mounts=additional_mounts,
                       remove_work_folder=remove_work_folder)
 
     add_fd_plot_to_report(subject=subject,
                           session=session,
-                          derivs_path=derivs_path)
-
+                          derivs_path=derivs_path,
+                          title=preproc_title)
