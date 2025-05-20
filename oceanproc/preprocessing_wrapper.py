@@ -34,6 +34,7 @@ infant_defaults = SimpleNamespace(
 preproc_kwargs = {
     "cifti-output":("91k", False),
     "output-spaces": ("fsLR", True),
+    "output-spaces": ("MNI152NLin2009cAsym", True)
 }
 
 # Preprocessing arguments that need to have their paths binded when running docker
@@ -277,9 +278,11 @@ def process_data(subject:str,
     for key, (val, multi) in preproc_kwargs.items():
         if (key in kwargs) and multi:
             if isinstance(kwargs[key], list):
-                kwargs[key].append(val)
+                if val not in kwargs[key]:
+                    kwargs[key].append(val)
             else:
-                kwargs[key] = [kwargs[key], val]
+                if val != kwargs[key]:
+                    kwargs[key] = [kwargs[key], val]
         elif key not in kwargs:
             kwargs[key] = val
 
