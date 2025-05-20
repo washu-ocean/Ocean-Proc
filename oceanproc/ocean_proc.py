@@ -186,6 +186,7 @@ def main():
     # log the input arguments
     for k,v in (dict(args._get_kwargs())).items():
         logger.info(f" {k} : {v}")
+    logger.info(f"extra arguments: {unknown_args}")
 
     preproc_work_dir = make_work_directory(dir_path=args.work_dir,
                                         subject=args.subject,

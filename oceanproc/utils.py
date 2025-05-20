@@ -106,7 +106,7 @@ def extract_options(option_chain:list) -> dict:
     for o in option_chain:
         if isinstance(o, str) and o.startswith("-"):
             if key:
-                opts[key] = val
+                opts[key] = val if val else True
             key = o.lstrip("-")
             val = None
         elif key:
@@ -118,7 +118,7 @@ def extract_options(option_chain:list) -> dict:
                 val = [val, o]
     else:
         if key:
-            opts[key] = val
+            opts[key] = val if val else True
     return opts
 
 def make_option(value, 
