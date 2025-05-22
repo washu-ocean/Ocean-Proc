@@ -278,10 +278,13 @@ def export_args_to_file(args,
     if extra_args:
         for key, val in extra_args.items():
             opt_key = make_option(True, key).strip()
-            if not val:
-                opts_to_save[opt_key] = ""
-                continue
-            opts_to_save[opt_key] = val
+            if val:
+                if isinstance(val, bool):
+                    opts_to_save[opt_key] = ""
+                elif isinstance(val, Path):
+                    opts_to_save[opt_key] = str(val.resolve())
+                else:
+                    opts_to_save[opt_key] = val
 
     with open(file_path, "w") as f:
         if file_path.suffix == ".json":
