@@ -105,6 +105,9 @@ def map_fmap_to_func(subject:str,
     
     if not xml_path.is_file():
         exit_program_early(f"Session xml file {xml_path} does not exist.")
+
+    logger.info("####### Pairing field maps to functional runs #######\n")
+
     layout = BIDSLayout(bids_path, validate=False)
     locals_series, study_id = get_locals_from_xml(xml_path=xml_path)
     logger.info(f"Localizers: {locals_series}")
