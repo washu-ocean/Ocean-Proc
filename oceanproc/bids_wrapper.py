@@ -240,9 +240,9 @@ def match_xml_to_nifti(nifti_dir:Path, xml_path:Path):
 @debug_logging
 def extend_session(subject:str,
                    session:str,
-                   tmp_dir:Path, 
+                   tmp_dir:Path,
                    bids_dir:Path):
-    
+
     if (tmp_ses_dcm_dir := tmp_dir / "tmp_dcm2bids").exists():
         logger.debug(f"removing the tmp_dcm2bids directory at the path: {tmp_ses_dcm_dir}")
         shutil.rmtree(tmp_ses_dcm_dir)
@@ -259,8 +259,8 @@ def extend_session(subject:str,
         tmp_run_num = int(tmp_file.entities['run']) if 'run' in tmp_file.entities else 1
         similar_files = bids_layout.get(**tmp_ent)
         if len(similar_files) == 0:
-            # tmp_ent['run'] = "01"
-            tmp_new_path = bids_layout.build_path(tmp_ent)
+            tmp_new_path = bids_layout.build_path(tmp_file.get_entities())
+            Path(tmp_new_path).parent.resolve().mkdir(parents=True, exist_ok=True)  # Make sure folder exists if not already created (e.g. 'fmap/')
             logger.info(f"moving file: {tmp_file.path} to: {tmp_new_path}")
             shutil.move(tmp_file.path, tmp_new_path)
             continue
@@ -274,9 +274,10 @@ def extend_session(subject:str,
             bids_file_ents = similar_files[0].get_entities()
             bids_file_ents['run'] = f"{(max_bids_run):02d}"
             bids_new_path = bids_layout.build_path(bids_file_ents)
+            Path(bids_new_path).parent.resolve().mkdir(parents=True, exist_ok=True)  # Make sure folder exists if not already created (e.g. 'fmap/')
             logger.info(f"moving file: {similar_files[0].path} to: {bids_new_path}")
             shutil.move(similar_files[0].path, bids_new_path)
-                
+
 
 @debug_logging
 def dicom_to_bids(subject:str,
@@ -286,9 +287,9 @@ def dicom_to_bids(subject:str,
                   xml_path:Path,
                   bids_config:Path,
                   nordic_config:Path = None,
-                  nifti:bool=False,
-                  skip_validate:bool=False,
-                  skip_prompt:bool=False):
+                  nifti:bool = False,
+                  skip_validate:bool = False,
+                  skip_prompt:bool = False):
     """
     Facilitates the conversion of DICOM data into NIFTI data in BIDS format, and the removal of data marked 'unusable'.
 
@@ -346,7 +347,7 @@ def dicom_to_bids(subject:str,
     # if flags.longitudinal:
     #     match_xml_to_nifti(nifti_dir=nifti_path,
     #                        xml_path=xml_path)
-        
+
     match_xml_to_nifti(nifti_dir=nifti_path,
                        xml_path=xml_path)
 
