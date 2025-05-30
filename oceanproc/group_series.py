@@ -241,7 +241,7 @@ def map_fmap_to_func(subject:str,
 
         # report the fieldmap pairings
         if len(pairing_strs) > 0:
-            logger.info(f"Field map pairings:")
+            logger.info("Field map pairings:")
             for ps in pairing_strs:
                 logger.info(f"{ps[0]} -->  {ps[1]}")
 
