@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import argparse
 import re
 from pathlib import Path
 import xml.etree.ElementTree as et
 from bids import BIDSLayout
-from .utils import exit_program_early, debug_logging, log_linebreak
 import logging
+from .utils import exit_program_early, debug_logging, log_linebreak
+
 module_logger = logging.getLogger("fsspec")
 module_logger.setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
+
 
 @debug_logging
 def get_locals_from_xml(xml_path: Path) -> tuple[set, str]:
@@ -29,12 +31,12 @@ def get_locals_from_xml(xml_path: Path) -> tuple[set, str]:
     scan_element_list = list(tree.iter(f"{prefix}scans"))
     exp_element_list = list(tree.iter(f"{prefix}experiments"))
     study_id = exp_element_list[0][0].get("study_id")
-    
+
     if len(scan_element_list) != 1:
         exit_program_early(f"Error parsing the xml file provided. Found none or more than one scan groups")
-    
+
     scans = scan_element_list[0]
-    
+
     localizers = set()
     for s in scans:
         if re.match(r"Localizer.*", s.get("type")) and s.find(f'{prefix}quality').text == "usable":
@@ -49,21 +51,20 @@ def get_func_from_bids(bids_layout: BIDSLayout,
                        session:str,
                        localizers: set,
                        study_id:str,
-                    #    json_dict: defaultdict[list],
                        groupings: list[dict[str:set]]):
-    
+
     func_files = bids_layout.get(subject=subject, session=session, suffix="bold", datatype="func", extension="nii.gz")
     if len(func_files) == 0:
         exit_program_early("Could not find any functional BOLD files for this subject and session.")
-    
+
     for bold_file in func_files:
         if bold_file.entities["study_id"] != study_id:
             continue
 
         acq_time = datetime.strptime(bold_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
         for i, (dt, series_id) in enumerate(localizers):
-            if i < len(localizers)-1:
-                if (acq_time > dt and acq_time < localizers[i+1][0]) and bold_file.entities["SeriesNumber"] > series_id:
+            if i < len(localizers) - 1:
+                if (acq_time > dt and acq_time < localizers[i + 1][0]) and bold_file.entities["SeriesNumber"] > series_id:
                     groupings[i]["task"].add((bold_file, acq_time))
                     break
             else:
@@ -75,9 +76,8 @@ def get_fmap_from_bids(bids_layout: BIDSLayout,
                        session:str,
                        localizers: set,
                        study_id:str,
-                    #    json_dict: defaultdict[list],
                        groupings: list[dict[str:set]]):
-    
+
     fmap_files = bids_layout.get(subject=subject, session=session, suffix="epi", datatype="fmap", extension="nii.gz")
     if len(fmap_files) == 0:
         exit_program_early("Could not find any fieldmap files for this subject and session.")
@@ -89,20 +89,86 @@ def get_fmap_from_bids(bids_layout: BIDSLayout,
         acq_time = datetime.strptime(epi_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
         direction = f"fmap{epi_file.entities['direction']}"
         for i, (dt, series_id) in enumerate(localizers):
-            if i < len(localizers)-1:
-                if (acq_time > dt and acq_time < localizers[i+1][0]) and epi_file.entities["SeriesNumber"] > series_id:
+            if i < len(localizers) - 1:
+                if (acq_time > dt and acq_time < localizers[i + 1][0]) and epi_file.entities["SeriesNumber"] > series_id:
                     groupings[i][direction].add((epi_file, acq_time))
                     break
             else:
                 groupings[i][direction].add((epi_file, acq_time))
 
 
+def uneven_fmap_pairing(localizer_group: dict) -> tuple:
+    """
+    If the number of AP/PA fieldmaps is different, this algorithm
+    will return N pairs of AP/PA fieldmap sets, where N is the number
+    of whichever fieldmap type has less fieldmaps. It will find one
+    fieldmap of each type, and pair it with its counterpart whose
+    acquisition time is closest to its own.
+
+    For example, if a group consists of two AP scans and one PA scan collected in order
+    (and all are marked as usable), this would return a tuple containing one fieldmap
+    pair consisting of the second AP scan and the first PA scan.
+
+    Note that the pairs will always be returned in the order (AP, PA).
+
+    :param localizer_group: Dictionary containing fieldmap information within a localizer group
+    :type localizer_group: dict
+    :return: Tuple of pairs of AP/PA fieldmaps
+    :rtype: tuple
+    """
+    fmap_pairs = []  # casted into tuple at the end
+    sortedAPs = sorted(localizer_group["fmapAP"], key=lambda x: x[1])
+    sortedPAs = sorted(localizer_group["fmapPA"], key=lambda x: x[1])
+    if len(sortedAPs) > len(sortedPAs):
+        bigger, smaller, reversed_order = sortedAPs, sortedPAs, False
+    else:
+        bigger, smaller, reversed_order = sortedPAs, sortedAPs, True
+    diff = timedelta.max
+    while len(smaller) > 0:
+        cur_smaller = smaller.pop(0)
+        while len(bigger) > 0 and (cur_diff := abs(bigger[0][1] - cur_smaller[1])) < diff:
+            cur_bigger = bigger.pop(0)
+            cur_pair = (cur_smaller, cur_bigger) if reversed_order else (cur_bigger, cur_smaller)
+            diff = cur_diff
+        diff = timedelta.max
+        fmap_pairs.append(cur_pair)
+        assert len(bigger) >= len(smaller)
+        if len(bigger) == len(smaller):
+            fmap_pairs.extend(
+                zip(smaller, bigger) if reversed_order else zip(bigger, smaller)
+            )
+            bigger.clear()
+            smaller.clear()
+    return tuple(fmap_pairs)
+
+
+def even_fmap_pairing(localizer_group: dict) -> tuple:
+    """
+    If the number of AP/PA fieldmaps are the same in a localizer
+    group, pair them in order of appearance.
+
+    Note that the pairs will always be returned in the order (AP, PA).
+
+    :param localizer_group: Dictionary containing fieldmap information within a localizer group
+    :type localizer_group: dict
+    :return: Tuple of pairs of AP/PA fieldmaps
+    :rtype: tuple
+    """
+    return tuple(
+        zip(
+            sorted(localizer_group["fmapAP"], key=lambda x: x[1]),
+            sorted(localizer_group["fmapPA"], key=lambda x: x[1])
+        )
+    )
+
+
 @debug_logging
 def map_fmap_to_func(subject:str,
                      session:str,
                      bids_path:Path,
-                     xml_path: Path):
-    
+                     xml_path: Path,
+                     allow_uneven_fmap_groups: bool = False):
+
     if not xml_path.is_file():
         exit_program_early(f"Session xml file {xml_path} does not exist.")
 
@@ -119,15 +185,15 @@ def map_fmap_to_func(subject:str,
                        localizers=locals_series,
                        study_id=study_id,
                        groupings=groups)
-    
+
     get_fmap_from_bids(bids_layout=layout,
                        subject=subject,
                        session=session,
                        localizers=locals_series,
                        study_id=study_id,
                        groupings=groups)
-    
-    logger.info(f"Localizer groups: ") 
+
+    logger.info("Localizer groups: ")
     for group_num, g in enumerate(groups):
         logger.info(f"\tgroup : {group_num}")
         for k, v in g.items():
@@ -135,19 +201,24 @@ def map_fmap_to_func(subject:str,
 
     for group in groups:
         if len(group["fmapAP"]) != len(group["fmapPA"]):
-            exit_program_early("Unequal number of AP and PA field maps.")
-        fmap_pairs = tuple(zip(sorted(group["fmapAP"], key=lambda x: x[1]), sorted(group["fmapPA"], key=lambda x: x[1])))
-        fmap_times = []
+            if not allow_uneven_fmap_groups:
+                exit_program_early(f"--allow_uneven_fmap_groups not set. (#AP: {len(group['fmapAP'])}, #PA: {len(group['fmapPA'])})")
+            elif len(group["fmapPA"]) == 0 or len(group["fmapAP"]) == 0:
+                exit_program_early(f"Not enough fieldmaps in one direction (#AP: {len(group['fmapAP'])}, #PA: {len(group['fmapPA'])})")
+            fmap_pairs = uneven_fmap_pairing(group)
+        else:
+            fmap_pairs = even_fmap_pairing(group)
 
+        fmap_times = []
         # get times for field maps
         for i, ((ap_file, ap_acq_time), (pa_file, pa_acq_time)) in enumerate(fmap_pairs):
             times = sorted((ap_acq_time, pa_acq_time))
-            fmap_times.append(times[0] + (abs(times[1] - times[0])/2))
+            fmap_times.append(times[0] + (abs(times[1] - times[0]) / 2))
 
         # pair task runs with field maps based on closest Acquisition Time
         map_pairings = {s:[] for s in fmap_pairs}
         for (t_file, t_acq_time) in group["task"]:
-            diff = list(map(lambda x: abs(x-t_acq_time), fmap_times))
+            diff = list(map(lambda x: abs(x - t_acq_time), fmap_times))
             pairing = fmap_pairs[diff.index(min(diff))]
             map_pairings[pairing].append(t_file)
 
@@ -168,8 +239,8 @@ def map_fmap_to_func(subject:str,
                     out_file.write(json.dumps(jd, indent=4))
                 pairing_strs.append((f"{fmap_file.filename}:{jd['SeriesNumber']}", ' '.join(task_series)))
 
-        # report the fieldmap pairings           
-        if len(pairing_strs) > 0:            
+        # report the fieldmap pairings
+        if len(pairing_strs) > 0:
             logger.info(f"Field map pairings:")
             for ps in pairing_strs:
                 logger.info(f"{ps[0]} -->  {ps[1]}")
@@ -178,7 +249,7 @@ def map_fmap_to_func(subject:str,
 def map_fmap_to_func_with_pairing_file(bids_dir_path: Path,
                                        pairing_json: Path):
     log_linebreak()
-    for json_path in bids_dir_path.glob("fmap/*json"): # reset IntendedFor field in all fmap json
+    for json_path in bids_dir_path.glob("fmap/*json"):  # reset IntendedFor field in all fmap json
         with open(json_path) as f:
             json_obj = json.load(f)
         json_obj["IntendedFor"] = []
@@ -205,12 +276,12 @@ def map_fmap_to_func_with_pairing_file(bids_dir_path: Path,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        prog="group_series.py", 
+        prog="group_series.py",
         description="Grouping field maps to BOLD task runs"
     )
     parser.add_argument("xml_ses_file", type=Path, help="The path to the xml file for this session")
     parser.add_argument("bids_ses_dir", type=Path, help="The path to the bids directory for this session")
     args = parser.parse_args()
 
-    map_fmap_to_func(xml_path=args.xml_ses_file, 
+    map_fmap_to_func(xml_path=args.xml_ses_file,
                      bids_dir_path=args.bids_ses_dir)

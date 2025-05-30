@@ -101,6 +101,8 @@ def main():
                                   help="Specifies skipping BIDS validation (only enabled for fMRIprep step)")
     config_arguments.add_argument("--fs_subjects_dir", "-fs", type=Path,
                                   help="The path to the directory that contains previous FreeSurfer outputs/derivatives to use for fMRIPrep. If empty, this is the path where new FreeSurfer outputs will be stored.")
+    config_arguments.add_argument("--allow_uneven_fmap_groups", action="store_true",
+                                  help="Flag to allow for automated fieldmap pairing when there's more AP- than PA-encoded fieldmaps, or vice versa (will still error out if at least one of each is not present.)")
     config_arguments.add_argument("--precomputed_derivatives", "-pd", type="Full-Path", dest="derivatives", nargs="*",
                                   help="A list of paths to any BIDS-style precomputed derivatives that should be used in preprocessing. (Ex. /path/to/bibsnet)")
     config_arguments.add_argument("--work_dir", "-w", type=Path, required=True,
@@ -239,6 +241,7 @@ def main():
                     session=args.session,
                     bids_path=args.bids_path,
                     xml_path=xml_data_path,
+                    allow_uneven_fmap_groups=args.allow_uneven_fmap_groups
                 )
 
     ##### Pair field maps to functional runs with pairing file #####
