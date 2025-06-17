@@ -41,7 +41,7 @@ def get_locals_from_xml(xml_path: Path) -> tuple[set, str]:
     for s in scans:
         if re.match(r"Localizer.*", s.get("type")) and s.find(f'{prefix}quality').text == "usable":
             acq_time = datetime.strptime(s.find(f"{prefix}startTime").text, "%H:%M:%S")
-            series_id = int(s.get("ID"))
+            series_id = s.get("ID")
             localizers.add((acq_time, series_id))
     return (sorted(localizers), study_id)
 
@@ -62,9 +62,9 @@ def get_func_from_bids(bids_layout: BIDSLayout,
             continue
 
         acq_time = datetime.strptime(bold_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
-        for i, (dt, series_id) in enumerate(localizers):
+        for i, (dt, _) in enumerate(localizers):
             if i < len(localizers) - 1:
-                if (acq_time > dt and acq_time < localizers[i + 1][0]) and bold_file.entities["SeriesNumber"] > series_id:
+                if (acq_time > dt and acq_time < localizers[i + 1][0]):
                     groupings[i]["task"].add((bold_file, acq_time))
                     break
             else:
@@ -88,9 +88,9 @@ def get_fmap_from_bids(bids_layout: BIDSLayout,
 
         acq_time = datetime.strptime(epi_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
         direction = f"fmap{epi_file.entities['direction']}"
-        for i, (dt, series_id) in enumerate(localizers):
+        for i, (dt, _) in enumerate(localizers):
             if i < len(localizers) - 1:
-                if (acq_time > dt and acq_time < localizers[i + 1][0]) and epi_file.entities["SeriesNumber"] > series_id:
+                if (acq_time > dt and acq_time < localizers[i + 1][0]):
                     groupings[i][direction].add((epi_file, acq_time))
                     break
             else:
