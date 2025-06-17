@@ -8,7 +8,7 @@ from pathlib import Path
 import xml.etree.ElementTree as et
 from bids import BIDSLayout
 import logging
-from .utils import exit_program_early, debug_logging, log_linebreak
+from .utils import exit_program_early, debug_logging, log_linebreak, flags
 
 module_logger = logging.getLogger("fsspec")
 module_logger.setLevel(logging.CRITICAL)
@@ -58,7 +58,7 @@ def get_func_from_bids(bids_layout: BIDSLayout,
         exit_program_early("Could not find any functional BOLD files for this subject and session.")
 
     for bold_file in func_files:
-        if bold_file.entities["study_id"] != study_id:
+        if flags.longitudinal and bold_file.entities["study_id"] != study_id:
             continue
 
         acq_time = datetime.strptime(bold_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
@@ -83,7 +83,7 @@ def get_fmap_from_bids(bids_layout: BIDSLayout,
         exit_program_early("Could not find any fieldmap files for this subject and session.")
 
     for epi_file in fmap_files:
-        if epi_file.entities["study_id"] != study_id:
+        if flags.longitudinal and epi_file.entities["study_id"] != study_id:
             continue
 
         acq_time = datetime.strptime(epi_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
