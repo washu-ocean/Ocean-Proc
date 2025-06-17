@@ -79,7 +79,7 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
     for file in data_files:
         if not Path(file.path).exists():
             continue
-        if file.entities["study_id"] != study_id:
+        if flags.longitudinal and file.entities["study_id"] != study_id:
             continue
         j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["ProtocolName"])
         if quality_pairs[j_key] == "unusable":
