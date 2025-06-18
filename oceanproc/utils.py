@@ -320,3 +320,20 @@ def load_data(func_file: str|Path,
         else:
             raise Exception("Volumetric data must also have an accompanying brain mask")
             # return None 
+
+
+def parcellate_dtseries(dtseries_path: Path, 
+                        parc_dlabel_path: Path) -> Path:
+    
+    ptseries_path = Path(str(dtseries_path.resolve()).replace("dtseries", "ptseries"))
+    parcellate_cmd = f"""wb_command -cifti-parcellate {dtseries_path.resolve()}
+                            {parc_dlabel_path.resolve()} COLUMN {ptseries_path.resolve()}"""
+    title = "wb_command"
+    try:
+        run_subprocess(parcellate_cmd, title="wb_command")
+    except RuntimeError as e:
+        prepare_subprocess_logging(logger, stop=True)
+        logger.exception(e, stack_info=True)
+        exit_program_early(f"Program '{title}' has run into an error.")
+
+    return ptseries_path
