@@ -45,7 +45,8 @@ def main():
         description="Ocean Labs adult MRI preprocessing",
         exit_on_error=False,
         fromfile_prefix_chars="@",
-        epilog="An arguments file can be accepted with @FILEPATH.\nAny additional arguments not listed in the help message will be passed to the preprocessing subprocess."
+        epilog="An arguments file can be accepted with @FILEPATH.\nAny additional arguments not listed in the help message will be passed to the preprocessing subprocess.",
+        allow_abbrev=False
     )
     parser.add_argument("--version", action="version", version='%(prog)s v1.1.2')
     session_arguments = parser.add_argument_group("Session Specific")
@@ -76,7 +77,7 @@ def main():
                                    help="Path to a file to save the current configuration arguments")
     session_arguments.add_argument("--keep_work_dir", action="store_true",
                                    help="Flag to stop the deletion of the fMRIPrep working directory")
-    session_arguments.add_argument("--debug", action="store_true",
+    session_arguments.add_argument("--debug_mode", action="store_true",
                                    help="Flag to run the program in debug mode for more verbose logging")
     session_arguments.add_argument("--fmap_pairing_file", type=Path,
                                    help="Path to JSON containing info on how to pair fieldmaps to BOLD runs.")
@@ -174,7 +175,7 @@ def main():
     log_path = log_dir / f"sub-{args.subject}_ses-{args.session}_oceanproc_desc-{datetime.datetime.now().strftime('%m-%d-%y_%I-%M%p')}.log"
     add_file_handler(logger, log_path)
 
-    if args.debug:
+    if args.debug_mode:
         flags.debug = True
         logger.setLevel(logging.DEBUG)
     if args.longitudinal:
