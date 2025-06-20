@@ -23,6 +23,13 @@ bids_entities = ["sub", "ses", "sample", "task", "tracksys",
                 "part", "proc", "hemi", "space", "split", "recording",
                 "chunk", "seg", "res", "den", "label", "desc"]
 
+cifti_files = [
+    ".dtseries.nii",
+    ".ptseries.nii",
+    ".dscalar.nii",
+    ".pscalar.nii"
+]
+
 def takes_arguments(decorator):
     """
     A meta-decorator to use on decorators that take in other
@@ -294,6 +301,19 @@ def export_args_to_file(args,
                 f.write(f"{k}{make_option(value=v)}\n")
 
 
+def is_cifti_file(file: str|Path) -> str|None:
+    if isinstance(file, Path):
+        file = str(file)
+    suffix = [cf for cf in cifti_files if file.endswith(cf)]
+    return suffix[0] if len(suffix) > 0 else None
+
+def is_nifti_file(file: str|Path) -> str|None:
+    if isinstance(file, Path):
+        file = str(file)
+    not_cifti = is_cifti_file(file) is None
+    suffix = [nf for nf in [".nii.gz", ".nii"] if file.endswith(nf)]
+    return suffix[0] if (len(suffix) > 0) and not_cifti else None
+
 @debug_logging
 def load_data(func_file: str|Path,
               brain_mask: str = None,
@@ -308,10 +328,10 @@ def load_data(func_file: str|Path,
             jd = json.load(f)
             tr = jd["RepetitionTime"]
 
-    if func_file.endswith(".dtseries.nii") or func_file.endswith(".dscalar.nii"):
+    if is_cifti_file(func_file):
         img = nib.load(func_file)
         return (img.get_fdata(), tr, img.header)
-    elif func_file.endswith(".nii") or func_file.endswith(".nii.gz"):
+    elif is_nifti_file(func_file):
         if brain_mask:
             img = nib.load(func_file)
             if fwhm is not None:
