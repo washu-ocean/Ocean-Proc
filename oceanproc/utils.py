@@ -23,6 +23,13 @@ bids_entities = ["sub", "ses", "sample", "task", "tracksys",
                 "part", "proc", "hemi", "space", "split", "recording",
                 "chunk", "seg", "res", "den", "label", "desc"]
 
+cifti_files = [
+    ".dtseries.nii",
+    ".ptseries.nii",
+    ".dscalar.nii",
+    ".pscalar.nii"
+]
+
 def takes_arguments(decorator):
     """
     A meta-decorator to use on decorators that take in other
@@ -294,6 +301,19 @@ def export_args_to_file(args,
                 f.write(f"{k}{make_option(value=v)}\n")
 
 
+def is_cifti_file(file: str|Path) -> str|None:
+    if isinstance(file, Path):
+        file = str(file)
+    suffix = [cf for cf in cifti_files if file.endswith(cf)]
+    return suffix[0] if len(suffix) > 0 else None
+
+def is_nifti_file(file: str|Path) -> str|None:
+    if isinstance(file, Path):
+        file = str(file)
+    not_cifti = is_cifti_file(file) is None
+    suffix = [nf for nf in [".nii.gz", ".nii"] if file.endswith(nf)]
+    return suffix[0] if (len(suffix) > 0) and not_cifti else None
+
 @debug_logging
 def load_data(func_file: str|Path,
               brain_mask: str = None,
@@ -308,10 +328,10 @@ def load_data(func_file: str|Path,
             jd = json.load(f)
             tr = jd["RepetitionTime"]
 
-    if func_file.endswith(".dtseries.nii") or func_file.endswith(".dscalar.nii"):
+    if is_cifti_file(func_file):
         img = nib.load(func_file)
         return (img.get_fdata(), tr, img.header)
-    elif func_file.endswith(".nii") or func_file.endswith(".nii.gz"):
+    elif is_nifti_file(func_file):
         if brain_mask:
             img = nib.load(func_file)
             if fwhm is not None:
@@ -320,3 +340,20 @@ def load_data(func_file: str|Path,
         else:
             raise Exception("Volumetric data must also have an accompanying brain mask")
             # return None 
+
+
+def parcellate_dtseries(dtseries_path: Path, 
+                        parc_dlabel_path: Path) -> Path:
+    
+    ptseries_path = Path(str(dtseries_path.resolve()).replace("dtseries", "ptseries"))
+    parcellate_cmd = f"""wb_command -cifti-parcellate {dtseries_path.resolve()}
+                            {parc_dlabel_path.resolve()} COLUMN {ptseries_path.resolve()}"""
+    title = "wb_command"
+    try:
+        run_subprocess(parcellate_cmd, title="wb_command")
+    except RuntimeError as e:
+        prepare_subprocess_logging(logger, stop=True)
+        logger.exception(e, stack_info=True)
+        exit_program_early(f"Program '{title}' has run into an error.")
+
+    return ptseries_path

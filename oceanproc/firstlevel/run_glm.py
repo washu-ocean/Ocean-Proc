@@ -16,7 +16,7 @@ from scipy import signal
 from scipy.stats import gamma
 from ..oceanparse import OceanParser
 from ..events_long import make_events_long
-from ..utils import exit_program_early, add_file_handler, default_log_format, export_args_to_file, flags, debug_logging, log_linebreak, load_data, prompt_user_continue
+from ..utils import exit_program_early, add_file_handler, default_log_format, export_args_to_file, flags, debug_logging, log_linebreak, load_data, prompt_user_continue, parcellate_dtseries
 import logging
 import datetime
 from textwrap import dedent
@@ -54,12 +54,12 @@ def create_image(data: npt.ArrayLike,
                 step=tr,
                 size=data.shape[0]
             )
-            suffix = ".dtseries" + suffix
+            suffix = (".ptseries" if flags.parcellated else ".dtseries") + suffix
         elif data.shape[0] == 1:
             ax0 = nib.cifti2.cifti2_axes.ScalarAxis(
                 name=["beta"]
             )
-            suffix = ".dscalar" + suffix
+            suffix = (".pscalar" if flags.parcellated else ".dscalar") + suffix
         else:
             raise RuntimeError("TR not supplied or data shape is incorrect")
         ax1 = None
@@ -618,7 +618,9 @@ def main():
                         the default of 2 will be used. Must be specifed with the '--volterra_columns' option.""")
     config_arguments.add_argument("--volterra_columns", "-vc", nargs="+", default=[],
                                   help="The confound columns to include in the expansion. Must be specifed with the '--volterra_lag' option.")
-
+    config_arguments.add_argument("--parcellate", "-parc", type=Path, 
+                                  help="Path to a dlabel file to use for parcellation of a dtseries")
+    
     args = parser.parse_args()
 
     if args.hrf is not None and args.fir is not None:
@@ -634,10 +636,17 @@ def main():
 
     if args.bold_file_type[0] != ".":
         args.bold_file_type = "." + args.bold_file_type
-    if (args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz") and (not args.brain_mask or not args.brain_mask.is_file()):
-        parser.error("If the bold file type is volumetric data, a valid '--brain_mask' option must also be supplied")
-    elif args.bold_file_type == ".dtseries.nii" and args.brain_mask:
+    if (args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz"):
+        if (not args.brain_mask) or (not args.brain_mask.is_file()):
+            parser.error("If the bold file type is volumetric data, a valid '--brain_mask' option must also be supplied")
+    elif args.brain_mask:
         args.brain_mask = None
+
+    if args.parcellate:
+        if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
+            parser.error("The 'parcellate' argument must be a file of type '.dlabel.nii' and must exist")
+    
+    flags.parcellated = (args.parcellate or args.bold_file_type == ".ptseries.nii")
 
     if (args.volterra_lag and not args.volterra_columns) or (not args.volterra_lag and args.volterra_columns):
         parser.error("The options '--volterra_lag' and '--volterra_columns' must be specifed together, or neither of them specified.")
@@ -715,6 +724,10 @@ def main():
         else:
             bold_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*bold{args.bold_file_type}"))
         assert len(bold_files) > 0, "Did not find any bold files in the given derivatives directory for the specified task and file type"
+
+        if args.parcellate and (args.bold_file_type == ".dtseries.nii"):
+            bold_files = [parcellate_dtseries(dtseries_path=dt, parc_dlabel_path=args.parcellate) for dt in bold_files]
+            args.bold_file_type = ".ptseries.nii"
 
         # for each BOLD run, find the accompanying confounds file and events/events long file
         for bold_path in bold_files:
