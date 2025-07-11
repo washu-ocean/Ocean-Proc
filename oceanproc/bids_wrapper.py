@@ -82,7 +82,7 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
         if flags.longitudinal and file.entities["study_id"] != study_id:
             continue
         j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["ProtocolName"])
-        if quality_pairs[j_key] == "unusable":
+        if (j_key in quality_pairs) and (quality_pairs[j_key] == "unusable"):
             logger.info(f"  Removing series {j_key[0]} - {j_key[1]} - {j_key[2]}: \n\t NIFTI:{file.path}")
             os.remove(file.path)
             assoc_list = set(list(file.get_associations()) + [af for assoc in file.get_associations() for af in assoc.get_associations()])
