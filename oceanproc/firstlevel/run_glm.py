@@ -390,30 +390,30 @@ def filter_data(func_data: npt.ArrayLike,
     assert mask.dtype == bool
 
     # pad the mask and functional data before filtering
-    padding_length = 50 # number of frames to pad on either side
-    padded_mask = np.pad(mask, (padding_length, padding_length), mode='constant', constant_values=True)
-    padded_func_data = np.pad(func_data, ((padding_length, padding_length), (0, 0)), mode='constant', constant_values=0)
+    # padding_length = 50 # number of frames to pad on either side
+    # padded_mask = np.pad(mask, (padding_length, padding_length), mode='constant', constant_values=True)
+    # padded_func_data = np.pad(func_data, ((padding_length, padding_length), (0, 0)), mode='constant', constant_values=0)
 
     # if the mask is excluding frames, interpolate the censored frames
     if np.sum(mask) < mask.shape[0]:
-        padded_func_data, _, padded_mask = _handle_scrubbed_volumes(
-            signals=padded_func_data,
+        func_data, _, mask = _handle_scrubbed_volumes(
+            signals=func_data,
             confounds=None,
-            sample_mask=padded_mask,
+            sample_mask=mask,
             filter_type="butterworth",
             t_r=tr,
             extrapolate=True
         )
 
-    padded_filtered_data = butterworth(
-        signals=padded_func_data,
+    filtered_data = butterworth(
+        signals=func_data,
         sampling_rate=1.0 / tr,
         low_pass=low_pass,
         high_pass=high_pass
     )
 
-    filtered_data = padded_filtered_data[padding_length:-padding_length, :]
-    assert filtered_data.shape[0] == func_data.shape[0], "Filtered data must have the same number of timepoints as the original functional data"
+    # filtered_data = padded_filtered_data[padding_length:-padding_length, :]
+    # assert filtered_data.shape[0] == func_data.shape[0], "Filtered data must have the same number of timepoints as the original functional data"
 
     return filtered_data
 
