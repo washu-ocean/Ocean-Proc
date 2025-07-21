@@ -83,12 +83,14 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
             continue
         j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["SeriesInstanceUID"])
         try:
-            if quality_pairs[j_key] == "unusable":
+            if j_key in quality_pairs and quality_pairs[j_key] == "unusable":
                 logger.info(f"  Removing series {j_key[0]} - {j_key[1]} - {j_key[2]}: \n\t NIFTI:{file.path}")
                 os.remove(file.path)
-                for assoc_file in file.get_associations():
-                    logger.info(f"      removing associated file: {assoc_file.path}")
-                    os.remove(assoc_file.path)
+                assoc_list = set(list(file.get_associations()) + [af for assoc in file.get_associations() for af in assoc.get_associations()])
+                for assoc_file in assoc_list:
+                    if Path(assoc_file.path).exists():
+                        logger.info(f"      removing associated file: {assoc_file.path}")
+                        os.remove(assoc_file.path)
         except KeyError:
             logger.warning(f"Could not find {j_key[0]} - {j_key[1]} - {j_key[2]}: \n\t NIFTI:{file.path} for removal. Continuing...")
 
