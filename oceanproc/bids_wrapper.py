@@ -17,7 +17,7 @@ module_logger.setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 '''
-remove_unusable -> relate xml and json with protocol name and aqcuisition time (and series id?)
+remove_unusable -> relate xml and json with name and aqcuisition time (and series id?)
 '''
 
 
@@ -91,6 +91,7 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
                     os.remove(assoc_file.path)
         except KeyError:
             logger.warning(f"Could not find {j_key[0]} - {j_key[1]} - {j_key[2]}: \n\t NIFTI:{file.path} for removal. Continuing...")
+
 
 
 @debug_logging
