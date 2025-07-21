@@ -17,7 +17,7 @@ module_logger.setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
 '''
-remove_unusable -> relate xml and json with protocol name and aqcuisition time (and series id?)
+remove_unusable -> relate xml and json with name and aqcuisition time (and series id?)
 '''
 
 
@@ -54,11 +54,11 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
     scans = scan_element_list[0]
     quality_pairs = {}
     for s in scans:
-        series_id = int(re.split(r'[-,;_.]', s.get("ID"))[0])
-        series_desc = s.find(f"{prefix}series_description").text
-        protocal_name = s.find(f"{prefix}protocolName").text
+        series_id = int(s.attrib['ID'])
+        series_desc = s.attrib['type']
+        series_uid = s.attrib['UID']
         quality_info = s.find(f"{prefix}quality").text
-        s_key = (series_id, series_desc, protocal_name)
+        s_key = (series_id, series_desc, series_uid)
         if s_key in quality_pairs and (quality_info == "unusable" or quality_pairs[s_key] == "unusable"):
             exit_program_early(f"Found scans with identical series numbers and protocol names in the session xml file. Cannot accurately differentiate these scans {s_key}")
         quality_pairs[s_key] = quality_info
@@ -81,15 +81,19 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
             continue
         if flags.longitudinal and file.entities["study_id"] != study_id:
             continue
-        j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["ProtocolName"])
-        if (j_key in quality_pairs) and (quality_pairs[j_key] == "unusable"):
-            logger.info(f"  Removing series {j_key[0]} - {j_key[1]} - {j_key[2]}: \n\t NIFTI:{file.path}")
-            os.remove(file.path)
-            assoc_list = set(list(file.get_associations()) + [af for assoc in file.get_associations() for af in assoc.get_associations()])
-            for assoc_file in assoc_list:
-                if Path(assoc_file.path).exists():
-                    logger.info(f"      removing associated file: {assoc_file.path}")
-                    os.remove(assoc_file.path)
+        j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["SeriesInstanceUID"])
+        try:
+            if j_key in quality_pairs and quality_pairs[j_key] == "unusable":
+                logger.info(f"  Removing series {j_key[0]} - {j_key[1]} - {j_key[2]}: \n\t NIFTI:{file.path}")
+                os.remove(file.path)
+                assoc_list = set(list(file.get_associations()) + [af for assoc in file.get_associations() for af in assoc.get_associations()])
+                for assoc_file in assoc_list:
+                    if Path(assoc_file.path).exists():
+                        logger.info(f"      removing associated file: {assoc_file.path}")
+                        os.remove(assoc_file.path)
+        except KeyError:
+            logger.warning(f"Could not find {j_key[0]} - {j_key[1]} - {j_key[2]}: \n\t NIFTI:{file.path} for removal. Continuing...")
+
 
 
 @debug_logging
