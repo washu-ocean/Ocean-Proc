@@ -362,7 +362,7 @@ def filter_data(func_data: npt.ArrayLike,
                 tr: float,
                 low_pass: float = 0.1,
                 high_pass: float = 0.008,
-                padtype: str = None,
+                padtype: str = "odd",
                 padlen: int = None):
     """
     Apply a lowpass, highpass, or bandpass filter to the functional data. Masked frames
@@ -394,7 +394,7 @@ def filter_data(func_data: npt.ArrayLike,
     padtype: str or None
 
         Type of padding used in butterworth filter.
-        Choices: "odd" (default if None), "even", "constant", "zero"
+        Choices: "odd" (default), "even", "constant", "zero", or "none".
 
         "zero" padding is the same as "constant", just with zeroes appended to either side
         of the timeseries, since "constant" pads by the last element on either end of
@@ -414,6 +414,7 @@ def filter_data(func_data: npt.ArrayLike,
     if not mask.shape[0] == func_data.shape[0]:
         raise ValueError("Mask must be the same length as the functional data")
     if not any((
+        padtype == "none",
         padlen is None,
         (padtype != "zero" and padlen > 0),
         (padtype == "zero" and padlen >= 2),
@@ -450,7 +451,7 @@ def filter_data(func_data: npt.ArrayLike,
             sampling_rate=1.0 / tr,
             low_pass=low_pass,
             high_pass=high_pass,
-            padtype=padtype,
+            padtype=None if padtype == "none" else padtype,
             padlen=padlen
         )
 
@@ -652,8 +653,8 @@ def main():
     config_arguments.add_argument("--lowpass", "-lp", type=float, nargs="?", const=0.1,
                                   help="""The low pass cutoff frequency for signal filtering. Frequencies above this value (Hz) will be filtered out. If the argument
                         is supplied but no value is given, then the value will default to 0.1 Hz""")
-    config_arguments.add_argument("--filter_padtype", default=None,
-                                  choices=["odd", "even", "zero", "constant"],
+    config_arguments.add_argument("--filter_padtype", default="odd",
+                                  choices=["odd", "even", "zero", "constant", "none"],
                                   help="Type of padding to use for low-, high-, or band-pass filter, if one is applied.")
     config_arguments.add_argument("--filter_padlen", type=int, default=None,
                                   help="Length of padding to add to the beginning and end of BOLD run before applying butterworth filter.")
