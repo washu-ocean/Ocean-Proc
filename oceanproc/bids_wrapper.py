@@ -56,9 +56,9 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
     for s in scans:
         series_id = int(s.attrib['ID'])
         series_desc = s.attrib['type']
-        series_uid = s.attrib['UID']
+        protocol_name = s.find(f"{prefix}protocolName").text
         quality_info = s.find(f"{prefix}quality").text
-        s_key = (series_id, series_desc, series_uid)
+        s_key = (series_id, series_desc, protocol_name)
         if s_key in quality_pairs and (quality_info == "unusable" or quality_pairs[s_key] == "unusable"):
             exit_program_early(f"Found scans with identical series numbers and protocol names in the session xml file. Cannot accurately differentiate these scans {s_key}")
         quality_pairs[s_key] = quality_info
@@ -81,7 +81,7 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
             continue
         if flags.longitudinal and file.entities["study_id"] != study_id:
             continue
-        j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["SeriesInstanceUID"])
+        j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["ProtocolName"])
         try:
             if j_key in quality_pairs and quality_pairs[j_key] == "unusable":
                 logger.info(f"  Removing series {j_key[0]} - {j_key[1]} - {j_key[2]}: \n\t NIFTI:{file.path}")
