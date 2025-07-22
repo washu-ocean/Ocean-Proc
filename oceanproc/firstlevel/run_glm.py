@@ -361,7 +361,9 @@ def filter_data(func_data: npt.ArrayLike,
                 mask: npt.ArrayLike,
                 tr: float,
                 low_pass: float = 0.1,
-                high_pass: float = 0.008):
+                high_pass: float = 0.008,
+                padtype: str = "odd",
+                padlen: int = None):
     """
     Apply a lowpass, highpass, or bandpass filter to the functional data. Masked frames
     are interploated using a cubic splice function before filtering. The returned array
@@ -370,50 +372,88 @@ def filter_data(func_data: npt.ArrayLike,
     Parameters
     ----------
     func_data: npt.ArrayLike
+
         A numpy array representing BOLD data
+
     mask: npt.ArrayLike
+
         A numpy array representing a mask along the first axis (time axis) of the BOLD data
+
     tr: float
+
         Repetition time at the scanner
+
     high_cut: float
+
         Frequency above which the bandpass filter will be applied
+
     low_cut: float
+
         Frequency below which the bandpass filter will be applied
+
+    padtype: str or None
+
+        Type of padding used in butterworth filter.
+        Choices: "odd" (default), "even", "constant", "zero", or "none".
+
+        "zero" padding is the same as "constant", just with zeroes appended to either side
+        of the timeseries, since "constant" pads by the last element on either end of
+        the timeseries.
+
+    padlen: int or None
+
+        Length of pad -- if None, default from `scipy.signal.filtfilt` will be used.
 
     Returns
     -------
 
     filtered_data: npt.ArrayLike
+
         A numpy array representing BOLD data with the filter applied
     """
-    assert mask.shape[0] == func_data.shape[0], "the mask must be the same length as the functional data"
-    assert mask.dtype == bool
-
-    # pad the mask and functional data before filtering
-    padding_length = 50 # number of frames to pad on either side
-    padded_mask = np.pad(mask, (padding_length, padding_length), mode='constant', constant_values=True)
-    padded_func_data = np.pad(func_data, ((padding_length, padding_length), (0, 0)), mode='constant', constant_values=0)
+    if not mask.shape[0] == func_data.shape[0]:
+        raise ValueError("Mask must be the same length as the functional data")
+    if not any((
+        padtype == "none",
+        padlen is None,
+        (padtype != "zero" and padlen > 0),
+        (padtype == "zero" and padlen >= 2),
+    )):
+        raise ValueError(f"Pad length of {padlen} incompatible with pad type {'odd' if padtype is None else padtype}")
 
     # if the mask is excluding frames, interpolate the censored frames
     if np.sum(mask) < mask.shape[0]:
-        padded_func_data, _, padded_mask = _handle_scrubbed_volumes(
-            signals=padded_func_data,
+        func_data, _, mask = _handle_scrubbed_volumes(
+            signals=func_data,
             confounds=None,
-            sample_mask=padded_mask,
+            sample_mask=mask,
             filter_type="butterworth",
             t_r=tr,
             extrapolate=True
         )
 
-    padded_filtered_data = butterworth(
-        signals=padded_func_data,
-        sampling_rate=1.0 / tr,
-        low_pass=low_pass,
-        high_pass=high_pass
-    )
-
-    filtered_data = padded_filtered_data[padding_length:-padding_length, :]
-    assert filtered_data.shape[0] == func_data.shape[0], "Filtered data must have the same number of timepoints as the original functional data"
+    if padtype == "zero":
+        padded_func_data = np.pad(func_data, ((1, 1), (0, 0)), mode='constant', constant_values=0)
+        if padlen is not None:
+            padlen -= 2
+        filtered_data = butterworth(
+            signals=padded_func_data,
+            sampling_rate=1.0 / tr,
+            low_pass=low_pass,
+            high_pass=high_pass,
+            padtype="constant",
+            padlen=padlen
+        )[1:-1, :]  # remove 0-pad frames on both sides
+        assert filtered_data.shape[0] == func_data.shape[0], "Filtered data must have the same number of timepoints as the original functional data"
+    else:
+        filtered_data = butterworth(
+            signals=func_data,
+            sampling_rate=1.0 / tr,
+            low_pass=low_pass,
+            high_pass=high_pass,
+            padtype=None if padtype == "none" else padtype,
+            padlen=padlen
+        )
 
     return filtered_data
 
@@ -613,14 +653,19 @@ def main():
     config_arguments.add_argument("--lowpass", "-lp", type=float, nargs="?", const=0.1,
                                   help="""The low pass cutoff frequency for signal filtering. Frequencies above this value (Hz) will be filtered out. If the argument
                         is supplied but no value is given, then the value will default to 0.1 Hz""")
+    config_arguments.add_argument("--filter_padtype", default="odd",
+                                  choices=["odd", "even", "zero", "constant", "none"],
+                                  help="Type of padding to use for low-, high-, or band-pass filter, if one is applied.")
+    config_arguments.add_argument("--filter_padlen", type=int, default=None,
+                                  help="Length of padding to add to the beginning and end of BOLD run before applying butterworth filter.")
     config_arguments.add_argument("--volterra_lag", "-vl", nargs="?", const=2, type=int,
                                   help="""The amount of frames to lag for a volterra expansion. If no value is specified
                         the default of 2 will be used. Must be specifed with the '--volterra_columns' option.""")
     config_arguments.add_argument("--volterra_columns", "-vc", nargs="+", default=[],
                                   help="The confound columns to include in the expansion. Must be specifed with the '--volterra_lag' option.")
-    config_arguments.add_argument("--parcellate", "-parc", type=Path, 
+    config_arguments.add_argument("--parcellate", "-parc", type=Path,
                                   help="Path to a dlabel file to use for parcellation of a dtseries")
-    
+
     args = parser.parse_args()
 
     if args.hrf is not None and args.fir is not None:
@@ -645,7 +690,7 @@ def main():
     if args.parcellate:
         if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
             parser.error("The 'parcellate' argument must be a file of type '.dlabel.nii' and must exist")
-    
+
     flags.parcellated = (args.parcellate or args.bold_file_type == ".ptseries.nii")
 
     if (args.volterra_lag and not args.volterra_columns) or (not args.volterra_lag and args.volterra_columns):
@@ -912,19 +957,19 @@ def main():
                         nuisance_fd_mask = nuisance_fd_arr < args.nuisance_fd
                     nuisance_mask &= nuisance_fd_mask
                     logger.info(f" a total of {np.sum(~nuisance_mask)} timepoints will be censored with this nuisance framewise displacement threshold")
-                
+
                 noise_columns = noise_df.columns.to_list()
                 not_found_noise_vars = {c for c in args.nuisance_regression if c not in noise_columns}
                 if len(not_found_noise_vars) > 0:
                     logger.info(f"The following nuisance variables were not found in the nuisance matrix and will not be used for nuisance regression: {','.join(not_found_noise_vars)}")
-                args.nuisance_regression = list({c for c in args.nuisance_regression if c in noise_columns}) if len(args.nuisance_regression)>0 else noise_columns
+                args.nuisance_regression = list({c for c in args.nuisance_regression if c in noise_columns}) if len(args.nuisance_regression) > 0 else noise_columns
                 if "mean" not in args.nuisance_regression:
                     args.nuisance_regression.append("mean")
-                    
+
                 leftover_noise_columns = [c for c in noise_columns if c not in args.nuisance_regression]
                 noise_regression_df = noise_df.loc[:, args.nuisance_regression].copy()
                 noise_df = noise_df.loc[:, leftover_noise_columns].copy() if len(leftover_noise_columns) > 0 else None
-                    
+
                 logger.info(" performing nuisance regression")
                 nuisance_betas, func_data_residuals = massuni_linGLM(
                     func_data=func_data,
@@ -976,7 +1021,8 @@ def main():
                     tr=tr,
                     low_pass=args.lowpass if args.lowpass else None,
                     high_pass=args.highpass if args.highpass else None,
-
+                    padtype=args.filter_padtype,
+                    padlen=args.filter_padlen,
                 )
                 run_map["data_filtered"] = func_data_filtered
                 func_data = func_data_filtered
