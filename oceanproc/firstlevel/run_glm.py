@@ -3,6 +3,7 @@ import numpy as np
 import sys
 import os
 from pathlib import Path
+import json
 import numpy.typing as npt
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -34,6 +35,8 @@ logging.basicConfig(level=logging.INFO,
                     handlers=[logging.StreamHandler(stream=sys.stdout)],
                     format=default_log_format)
 logger = logging.getLogger()
+
+VERSION = "1.1.3"
 
 
 @debug_logging
@@ -238,7 +241,7 @@ def make_noise_ts(confounds_file: str,
     if volterra_expansion and volterra_columns:
         for vc in volterra_columns:
             for lag in range(volterra_expansion):
-                nuisance.loc[:, f"{vc}_{lag+1}"] = nuisance.loc[:, vc].shift(lag + 1)
+                nuisance.loc[:, f"{vc}_{lag + 1}"] = nuisance.loc[:, vc].shift(lag + 1)
         nuisance.fillna(0, inplace=True)
     elif volterra_expansion:
         raise RuntimeError("You must specify which columns you'd like to apply Volterra expansion to.")
@@ -563,6 +566,8 @@ def main():
         fromfile_prefix_chars="@",
         epilog="An arguments file can be accepted with @FILEPATH"
     )
+
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     session_arguments = parser.add_argument_group("Session Specific")
     config_arguments = parser.add_argument_group("Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
 
@@ -725,6 +730,9 @@ def main():
 
     # check if previous outputs exist in the output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    dataset_description_json = args.output_dir / "dataset_description.json"
+    descriptions_list = []
+    descriptions_tsv = args.output_dir / "descriptions.tsv"
     unmodified_output_dir_contents = set(args.output_dir.iterdir())
     old_outputs = set(args.output_dir.glob(f"{file_name_base}*"))
     if not args.force_overwrite and len(old_outputs) != 0:
@@ -1111,6 +1119,15 @@ def main():
                     header=img_header
                 )
                 beta_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-beta-{c}-frame-0{user_desc}{img_suffix}"
+                descriptions_list.append({
+                    "desc_id": f"model-{model_type}-beta-{c}-frame-0{user_desc}",
+                    "description": f"Represents beta weights in a {model_type} model, representing modelled regressor {c}. {'Additional notes: ' + user_desc if len(user_desc) > 0 else ''}",
+                    "model_type": model_type,
+                    "condition": c,
+                    "additional_desc": user_desc,
+                    "frame": 0,
+                    "is_nuisance": False
+                })
                 logger.info(f" saving betas for variable {c} to file: {beta_filename}")
                 nib.save(
                     beta_img,
@@ -1131,6 +1148,15 @@ def main():
                         header=img_header
                     )
                     beta_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-beta-{condition}-frame-{f}{user_desc}{img_suffix}"
+                    descriptions_list.append({
+                        "desc_id": f"model-{model_type}-beta-{condition}-frame-0{user_desc}",
+                        "description": f"Represents beta weights in a {model_type} model, representing modelled regressor {condition} at frame {f}. {'Additional notes: ' + user_desc if len(user_desc) > 0 else ''}",
+                        "model_type": model_type,
+                        "condition": condition,
+                        "additional_desc": user_desc,
+                        "frame": f,
+                        "is_nuisance": False
+                    })
                     logger.info(f" saving betas for variable {condition} frame {f} to file: {beta_filename}")
                     nib.save(
                         beta_img,
@@ -1164,6 +1190,15 @@ def main():
                     header=img_header
                 )
                 beta_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-beta-{noise_col}-frame-0{user_desc}{img_suffix}"
+                descriptions_list.append({
+                    "desc_id": f"model-{model_type}-beta-{noise_col}-frame-0{user_desc}",
+                    "description": f"Represents beta weights in a {model_type} model, representing nuisance regressor {noise_col}. {'Additional notes: ' + user_desc if len(user_desc) > 0 else ''}",
+                    "model_type": model_type,
+                    "condition": noise_col,
+                    "additional_desc": user_desc,
+                    "frame": 0,
+                    "is_nuisance": True
+                })
                 logger.debug(f" saving betas for nuisance variable: {noise_col} to file: {beta_filename}")
                 nib.save(
                     beta_img,
@@ -1198,6 +1233,19 @@ def main():
         logger.exception(e, stack_info=True)
         exit_program_early(str(e))
 
+    descriptions_df = pd.DataFrame(descriptions_list)
+    if not descriptions_tsv.is_file():
+        descriptions_df.to_csv(descriptions_tsv, sep='\t')
+        logger.info(f"Wrote descriptions to {descriptions_tsv.resolve()!s}")
+    dataset_description = {
+        "Name": f"oceanfla {VERSION}",
+        "BIDSVersion": "1.10.0",
+        "DatasetType": "derivative"
+    }
+    if not dataset_description_json.is_file():
+        with dataset_description_json.open("w") as f:
+            json.dump(dataset_description, f, indent=4)
+            logger.info(f"Wrote dataset description to {dataset_description_json.resolve()!s}")
     logger.info("oceanfla complete!")
 
 
