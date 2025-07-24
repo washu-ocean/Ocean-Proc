@@ -19,6 +19,7 @@ from ..oceanparse import OceanParser
 from ..events_long import make_events_long
 from ..utils import exit_program_early, add_file_handler, default_log_format, export_args_to_file, flags, debug_logging, log_linebreak, load_data, prompt_user_continue, parcellate_dtseries
 import logging
+import argparse
 import datetime
 from textwrap import dedent
 
@@ -632,7 +633,8 @@ def main():
                                   help="The framewise displacement threshold used when censoring high-motion frames")
     config_arguments.add_argument("--minimum_unmasked_neighbors", type=int, default=None,
                                   help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
-    # Add tmask flag
+    config_arguments.add_argument("--tmask", action= argparse.BooleanOptionalAction, 
+                                  help="Flag to indicate that tmask files, if found with the preprocessed outputs, should be used. Tmask files will override framewise displacement threshold censoring if applicable.")
     config_arguments.add_argument("--repetition_time", "-tr", type=float,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
@@ -790,20 +792,28 @@ def main():
 
             confounds_search_path = f"{bold_base}_desc*-confounds_timeseries.tsv"
             confounds_files = list(bold_path.parent.glob(confounds_search_path))
-            assert len(confounds_files) == 1, f"Found more or less than one confounds file for bold run: {str(bold_path)} search path: {confounds_search_path} len: {len(confounds_files)}"
+            assert len(confounds_files) == 1, f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}"
             file_map["confounds"] = confounds_files[0]
+
+            if args.tmask:
+                tmask_search_path = f"{bold_base}_tmask.txt"
+                tmask_files = list(bold_path.parent.glob(tmask_search_path))
+                if len(tmask_files) != 1:
+                    logger.warning(f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}. No tmask will be used for this run.")
+                else:
+                    file_map["tmask"] = tmask_files[0]
 
             if args.events_long:
                 events_long_search_path = f"{bold_base}*_desc*events_long.csv"
                 glob_path = args.raw_bids / f"**/{events_long_search_path}"
                 events_long_files = list(args.events_long.glob(f"**/{events_long_search_path}"))
-                assert len(events_long_files) == 1, f"Found more or less than one events long file for bold run: {str(bold_path)} search path: {str(glob_path)} len: {len(events_long_files)}"
+                assert len(events_long_files) == 1, f"Found {len(events_long_files)} events long files for bold run: {str(bold_path)} search path: {str(glob_path)}"
                 file_map["events"] = events_long_files[0]
             else:
                 event_search_path = f"{bold_base}*_events.tsv"
                 glob_path = args.raw_bids / f"**/{event_search_path}"
                 event_files = list(args.raw_bids.glob("**/" + event_search_path))
-                assert len(event_files) == 1, f"Found more or less than one event file for bold run: {str(bold_path)} search path: {str(glob_path)} len: {len(event_files)}"
+                assert len(event_files) == 1, f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(glob_path)}"
                 file_map["events"] = event_files[0]
 
             file_map_list.append(file_map)
@@ -880,8 +890,14 @@ def main():
             noise_df = noise_df.loc[acquisition_mask, :]
 
             # create high motion mask and exclude run if needed
-            run_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
-            if args.fd_censoring:
+            run_mask = np.full(shape=(func_data.shape[0],)).astype(bool)
+
+            if "tmask" in run_map:
+                tmask = np.loadtxt(run_map["tmask"], dtype=bool)
+                assert tmask.shape == acquisition_mask.shape, f"Tmask file ({tmask.shape[0]}) does not match the length of the run ({acquisition_mask.shape[0]}): {run_map['tmask']}"
+                run_mask &= tmask
+
+            elif args.fd_censoring:
                 logger.info(f" censoring timepoints using a high motion mask with a framewise displacement threshold of {args.fd_threshold}")
                 confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
                 fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
