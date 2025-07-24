@@ -1236,7 +1236,7 @@ def main():
     descriptions_df = pd.DataFrame(descriptions_list)
     if not descriptions_tsv.is_file():
         descriptions_df.to_csv(descriptions_tsv, sep='\t')
-
+        logger.info(f"Wrote descriptions to {descriptions_tsv.resolve()!s}")
     dataset_description = {
         "Name": f"oceanfla {VERSION}",
         "BIDSVersion": "1.10.0",
@@ -1245,6 +1245,7 @@ def main():
     if not dataset_description_json.is_file():
         with dataset_description_json.open("w") as f:
             json.dump(dataset_description, f, indent=4)
+            logger.info(f"Wrote dataset description to {dataset_description_json.resolve()!s}")
     logger.info("oceanfla complete!")
 
 
