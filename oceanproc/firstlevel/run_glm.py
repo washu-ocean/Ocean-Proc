@@ -796,7 +796,7 @@ def main():
             file_map["confounds"] = confounds_files[0]
 
             if args.tmask:
-                tmask_search_path = f"{bold_base}_tmask.txt"
+                tmask_search_path = f"{bold_base}*_tmask.txt"
                 tmask_files = list(bold_path.parent.glob(tmask_search_path))
                 if len(tmask_files) != 1:
                     logger.warning(f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}. No tmask will be used for this run.")
@@ -890,32 +890,34 @@ def main():
             noise_df = noise_df.loc[acquisition_mask, :]
 
             # create high motion mask and exclude run if needed
-            run_mask = np.full(shape=(func_data.shape[0],)).astype(bool)
+            run_mask = np.full((func_data.shape[0],), 1).astype(bool)
 
-            if "tmask" in run_map:
-                tmask = np.loadtxt(run_map["tmask"], dtype=bool)
-                assert tmask.shape == acquisition_mask.shape, f"Tmask file ({tmask.shape[0]}) does not match the length of the run ({acquisition_mask.shape[0]}): {run_map['tmask']}"
-                run_mask &= tmask
+            if args.tmask or args.fd_censoring:
+                if "tmask" in run_map:
+                    logger.info(f" censoring timepoints using the tmask file: {run_map['tmask']}")
+                    tmask = np.loadtxt(run_map["tmask"], dtype=int).astype(bool)
+                    assert tmask.shape == acquisition_mask.shape, f"Tmask file ({tmask.shape[0]}) does not match the length of the run ({acquisition_mask.shape[0]}): {run_map['tmask']}"
+                    run_mask &= tmask[acquisition_mask]
 
-            elif args.fd_censoring:
-                logger.info(f" censoring timepoints using a high motion mask with a framewise displacement threshold of {args.fd_threshold}")
-                confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
-                fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
-                if args.minimum_unmasked_neighbors:
-                    fd_arr_padded = np.pad(fd_arr, pad_width := args.minimum_unmasked_neighbors)
-                    fd_mask = np.full(fd_arr_padded.shape, False)
-                    for i in range(pad_width, len(fd_arr_padded) - pad_width):
-                        if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < args.fd_threshold):
-                            fd_mask[i] = True
-                        else:
-                            fd_mask[i] = False
-                    fd_mask = fd_mask[pad_width:-pad_width]
-                else:
-                    fd_mask = fd_arr < args.fd_threshold
-                run_mask &= fd_mask
-                logger.info(f" a total of {np.sum(~run_mask)} timepoints will be censored with this framewise displacement threshold")
+                elif args.fd_censoring:
+                    logger.info(f" censoring timepoints using a high motion mask with a framewise displacement threshold of {args.fd_threshold}")
+                    confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
+                    fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
+                    if args.minimum_unmasked_neighbors:
+                        fd_arr_padded = np.pad(fd_arr, pad_width := args.minimum_unmasked_neighbors)
+                        fd_mask = np.full(fd_arr_padded.shape, False)
+                        for i in range(pad_width, len(fd_arr_padded) - pad_width):
+                            if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < args.fd_threshold):
+                                fd_mask[i] = True
+                            else:
+                                fd_mask[i] = False
+                        fd_mask = fd_mask[pad_width:-pad_width]
+                    else:
+                        fd_mask = fd_arr < args.fd_threshold
+                    run_mask &= fd_mask
+                logger.info(f" a total of {np.sum(~run_mask)} timepoints will be censored from this run")
                 frame_retention_percent = (np.sum(run_mask) / run_mask.shape[0]) * 100
-                logger.info(f" total run length after start censoring: {run_mask.shape[0]}, number of frames retained after high motion censoring: {np.sum(run_mask)}")
+
                 # if censoring causes the number of retained frames to be below the run exclusion threshold, drop the run
                 if args.run_exclusion_threshold and (frame_retention_percent < args.run_exclusion_threshold):
                     logger.info(f" BOLD run: {run_map['bold']} has fell below the run exclusion threshold of {args.run_exclusion_threshold}% and will not be used in the final GLM.")
