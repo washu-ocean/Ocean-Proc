@@ -416,8 +416,8 @@ def filter_data(func_data: npt.ArrayLike,
     if not any((
         padtype == "none",
         padlen is None,
-        (padtype != "zero" and padlen > 0),
-        (padtype == "zero" and padlen >= 2),
+        (padtype != "zero" and padlen is not None and padlen > 0),
+        (padtype == "zero" and padlen is not None and padlen >= 2),
     )):
         raise ValueError(f"Pad length of {padlen} incompatible with pad type {'odd' if padtype is None else padtype}")
 
