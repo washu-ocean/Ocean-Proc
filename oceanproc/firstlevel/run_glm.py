@@ -732,9 +732,9 @@ def main():
 
     # check if previous outputs exist in the output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    dataset_description_json = args.output_dir / "dataset_description.json"
+    dataset_description_json = args.derivs_dir / args.derivs_subfolder / "dataset_description.json"
     descriptions_list = []
-    descriptions_tsv = args.output_dir / "descriptions.tsv"
+    descriptions_tsv = args.derivs_dir / args.derivs_subfolder / "descriptions.tsv"
     unmodified_output_dir_contents = set(args.output_dir.iterdir())
     old_outputs = set(args.output_dir.glob(f"{file_name_base}*"))
     if not args.force_overwrite and len(old_outputs) != 0:
