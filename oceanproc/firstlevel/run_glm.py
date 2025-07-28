@@ -799,7 +799,7 @@ def main():
                 tmask_search_path = f"{bold_base}*_tmask.txt"
                 tmask_files = list(bold_path.parent.glob(tmask_search_path))
                 if len(tmask_files) != 1:
-                    logger.warning(f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}. No tmask will be used for this run.")
+                    logger.warning(f"Found {len(tmask_files)} tmask files for bold run: {str(bold_path)} search path: {tmask_search_path}. No tmask will be used for this run.")
                 else:
                     file_map["tmask"] = tmask_files[0]
 
