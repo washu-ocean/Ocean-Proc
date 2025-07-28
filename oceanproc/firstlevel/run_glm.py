@@ -3,6 +3,7 @@ import numpy as np
 import sys
 import os
 from pathlib import Path
+import json
 import numpy.typing as npt
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -18,6 +19,7 @@ from ..oceanparse import OceanParser
 from ..events_long import make_events_long
 from ..utils import exit_program_early, add_file_handler, default_log_format, export_args_to_file, flags, debug_logging, log_linebreak, load_data, prompt_user_continue, parcellate_dtseries
 import logging
+import argparse
 import datetime
 from textwrap import dedent
 
@@ -34,6 +36,8 @@ logging.basicConfig(level=logging.INFO,
                     handlers=[logging.StreamHandler(stream=sys.stdout)],
                     format=default_log_format)
 logger = logging.getLogger()
+
+VERSION = "1.1.3"
 
 
 @debug_logging
@@ -238,7 +242,7 @@ def make_noise_ts(confounds_file: str,
     if volterra_expansion and volterra_columns:
         for vc in volterra_columns:
             for lag in range(volterra_expansion):
-                nuisance.loc[:, f"{vc}_{lag+1}"] = nuisance.loc[:, vc].shift(lag + 1)
+                nuisance.loc[:, f"{vc}_{lag + 1}"] = nuisance.loc[:, vc].shift(lag + 1)
         nuisance.fillna(0, inplace=True)
     elif volterra_expansion:
         raise RuntimeError("You must specify which columns you'd like to apply Volterra expansion to.")
@@ -563,6 +567,8 @@ def main():
         fromfile_prefix_chars="@",
         epilog="An arguments file can be accepted with @FILEPATH"
     )
+
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     session_arguments = parser.add_argument_group("Session Specific")
     config_arguments = parser.add_argument_group("Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
 
@@ -627,7 +633,8 @@ def main():
                                   help="The framewise displacement threshold used when censoring high-motion frames")
     config_arguments.add_argument("--minimum_unmasked_neighbors", type=int, default=None,
                                   help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
-    # Add tmask flag
+    config_arguments.add_argument("--tmask", action= argparse.BooleanOptionalAction, 
+                                  help="Flag to indicate that tmask files, if found with the preprocessed outputs, should be used. Tmask files will override framewise displacement threshold censoring if applicable.")
     config_arguments.add_argument("--repetition_time", "-tr", type=float,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
@@ -725,6 +732,9 @@ def main():
 
     # check if previous outputs exist in the output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    dataset_description_json = args.output_dir / "dataset_description.json"
+    descriptions_list = []
+    descriptions_tsv = args.output_dir / "descriptions.tsv"
     unmodified_output_dir_contents = set(args.output_dir.iterdir())
     old_outputs = set(args.output_dir.glob(f"{file_name_base}*"))
     if not args.force_overwrite and len(old_outputs) != 0:
@@ -782,20 +792,28 @@ def main():
 
             confounds_search_path = f"{bold_base}_desc*-confounds_timeseries.tsv"
             confounds_files = list(bold_path.parent.glob(confounds_search_path))
-            assert len(confounds_files) == 1, f"Found more or less than one confounds file for bold run: {str(bold_path)} search path: {confounds_search_path} len: {len(confounds_files)}"
+            assert len(confounds_files) == 1, f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}"
             file_map["confounds"] = confounds_files[0]
+
+            if args.tmask:
+                tmask_search_path = f"{bold_base}*_tmask.txt"
+                tmask_files = list(bold_path.parent.glob(tmask_search_path))
+                if len(tmask_files) != 1:
+                    logger.warning(f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}. No tmask will be used for this run.")
+                else:
+                    file_map["tmask"] = tmask_files[0]
 
             if args.events_long:
                 events_long_search_path = f"{bold_base}*_desc*events_long.csv"
                 glob_path = args.raw_bids / f"**/{events_long_search_path}"
                 events_long_files = list(args.events_long.glob(f"**/{events_long_search_path}"))
-                assert len(events_long_files) == 1, f"Found more or less than one events long file for bold run: {str(bold_path)} search path: {str(glob_path)} len: {len(events_long_files)}"
+                assert len(events_long_files) == 1, f"Found {len(events_long_files)} events long files for bold run: {str(bold_path)} search path: {str(glob_path)}"
                 file_map["events"] = events_long_files[0]
             else:
                 event_search_path = f"{bold_base}*_events.tsv"
                 glob_path = args.raw_bids / f"**/{event_search_path}"
                 event_files = list(args.raw_bids.glob("**/" + event_search_path))
-                assert len(event_files) == 1, f"Found more or less than one event file for bold run: {str(bold_path)} search path: {str(glob_path)} len: {len(event_files)}"
+                assert len(event_files) == 1, f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(glob_path)}"
                 file_map["events"] = event_files[0]
 
             file_map_list.append(file_map)
@@ -872,26 +890,34 @@ def main():
             noise_df = noise_df.loc[acquisition_mask, :]
 
             # create high motion mask and exclude run if needed
-            run_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
-            if args.fd_censoring:
-                logger.info(f" censoring timepoints using a high motion mask with a framewise displacement threshold of {args.fd_threshold}")
-                confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
-                fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
-                if args.minimum_unmasked_neighbors:
-                    fd_arr_padded = np.pad(fd_arr, pad_width := args.minimum_unmasked_neighbors)
-                    fd_mask = np.full(fd_arr_padded.shape, False)
-                    for i in range(pad_width, len(fd_arr_padded) - pad_width):
-                        if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < args.fd_threshold):
-                            fd_mask[i] = True
-                        else:
-                            fd_mask[i] = False
-                    fd_mask = fd_mask[pad_width:-pad_width]
-                else:
-                    fd_mask = fd_arr < args.fd_threshold
-                run_mask &= fd_mask
-                logger.info(f" a total of {np.sum(~run_mask)} timepoints will be censored with this framewise displacement threshold")
+            run_mask = np.full((func_data.shape[0],), 1).astype(bool)
+
+            if args.tmask or args.fd_censoring:
+                if "tmask" in run_map:
+                    logger.info(f" censoring timepoints using the tmask file: {run_map['tmask']}")
+                    tmask = np.loadtxt(run_map["tmask"], dtype=int).astype(bool)
+                    assert tmask.shape == acquisition_mask.shape, f"Tmask file ({tmask.shape[0]}) does not match the length of the run ({acquisition_mask.shape[0]}): {run_map['tmask']}"
+                    run_mask &= tmask[acquisition_mask]
+
+                elif args.fd_censoring:
+                    logger.info(f" censoring timepoints using a high motion mask with a framewise displacement threshold of {args.fd_threshold}")
+                    confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
+                    fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
+                    if args.minimum_unmasked_neighbors:
+                        fd_arr_padded = np.pad(fd_arr, pad_width := args.minimum_unmasked_neighbors)
+                        fd_mask = np.full(fd_arr_padded.shape, False)
+                        for i in range(pad_width, len(fd_arr_padded) - pad_width):
+                            if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < args.fd_threshold):
+                                fd_mask[i] = True
+                            else:
+                                fd_mask[i] = False
+                        fd_mask = fd_mask[pad_width:-pad_width]
+                    else:
+                        fd_mask = fd_arr < args.fd_threshold
+                    run_mask &= fd_mask
+                logger.info(f" a total of {np.sum(~run_mask)} timepoints will be censored from this run")
                 frame_retention_percent = (np.sum(run_mask) / run_mask.shape[0]) * 100
-                logger.info(f" total run length after start censoring: {run_mask.shape[0]}, number of frames retained after high motion censoring: {np.sum(run_mask)}")
+
                 # if censoring causes the number of retained frames to be below the run exclusion threshold, drop the run
                 if args.run_exclusion_threshold and (frame_retention_percent < args.run_exclusion_threshold):
                     logger.info(f" BOLD run: {run_map['bold']} has fell below the run exclusion threshold of {args.run_exclusion_threshold}% and will not be used in the final GLM.")
@@ -1111,6 +1137,15 @@ def main():
                     header=img_header
                 )
                 beta_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-beta-{c}-frame-0{user_desc}{img_suffix}"
+                descriptions_list.append({
+                    "desc_id": f"model-{model_type}-beta-{c}-frame-0{user_desc}",
+                    "description": f"Represents beta weights in a {model_type} model, representing modelled regressor {c}. {'Additional notes: ' + user_desc if len(user_desc) > 0 else ''}",
+                    "model_type": model_type,
+                    "condition": c,
+                    "additional_desc": user_desc,
+                    "frame": 0,
+                    "is_nuisance": False
+                })
                 logger.info(f" saving betas for variable {c} to file: {beta_filename}")
                 nib.save(
                     beta_img,
@@ -1131,6 +1166,15 @@ def main():
                         header=img_header
                     )
                     beta_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-beta-{condition}-frame-{f}{user_desc}{img_suffix}"
+                    descriptions_list.append({
+                        "desc_id": f"model-{model_type}-beta-{condition}-frame-0{user_desc}",
+                        "description": f"Represents beta weights in a {model_type} model, representing modelled regressor {condition} at frame {f}. {'Additional notes: ' + user_desc if len(user_desc) > 0 else ''}",
+                        "model_type": model_type,
+                        "condition": condition,
+                        "additional_desc": user_desc,
+                        "frame": f,
+                        "is_nuisance": False
+                    })
                     logger.info(f" saving betas for variable {condition} frame {f} to file: {beta_filename}")
                     nib.save(
                         beta_img,
@@ -1164,6 +1208,15 @@ def main():
                     header=img_header
                 )
                 beta_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-beta-{noise_col}-frame-0{user_desc}{img_suffix}"
+                descriptions_list.append({
+                    "desc_id": f"model-{model_type}-beta-{noise_col}-frame-0{user_desc}",
+                    "description": f"Represents beta weights in a {model_type} model, representing nuisance regressor {noise_col}. {'Additional notes: ' + user_desc if len(user_desc) > 0 else ''}",
+                    "model_type": model_type,
+                    "condition": noise_col,
+                    "additional_desc": user_desc,
+                    "frame": 0,
+                    "is_nuisance": True
+                })
                 logger.debug(f" saving betas for nuisance variable: {noise_col} to file: {beta_filename}")
                 nib.save(
                     beta_img,
@@ -1198,6 +1251,19 @@ def main():
         logger.exception(e, stack_info=True)
         exit_program_early(str(e))
 
+    descriptions_df = pd.DataFrame(descriptions_list)
+    if not descriptions_tsv.is_file():
+        descriptions_df.to_csv(descriptions_tsv, sep='\t')
+        logger.info(f"Wrote descriptions to {descriptions_tsv.resolve()!s}")
+    dataset_description = {
+        "Name": f"oceanfla {VERSION}",
+        "BIDSVersion": "1.10.0",
+        "DatasetType": "derivative"
+    }
+    if not dataset_description_json.is_file():
+        with dataset_description_json.open("w") as f:
+            json.dump(dataset_description, f, indent=4)
+            logger.info(f"Wrote dataset description to {dataset_description_json.resolve()!s}")
     logger.info("oceanfla complete!")
 
 
