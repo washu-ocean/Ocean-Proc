@@ -42,15 +42,16 @@ VERSION = "1.1.3"
 
 @debug_logging
 def create_image(data: npt.ArrayLike,
+                 imagetype: str,
                  brain_mask: str = None,
                  tr: float = None,
                  header: nib.cifti2.cifti2.Cifti2Header = None):
     img = None
     suffix = ".nii"
     d32k = 32492
-    if brain_mask:
+    if imagetype == "nifti":
         img = nmask.unmask(data, brain_mask)
-    else:
+    elif imagetype == "cifti":
         ax0 = None
         if data.shape[0] > 1 and tr:
             ax0 = nib.cifti2.cifti2_axes.SeriesAxis(
@@ -685,14 +686,15 @@ def main():
         if not (args.custom_hrf.exists() and args.custom_hrf.suffix == ".txt"):
             parser.error("The 'custom_hrf' argument must be a file of type '.txt' and must exist")
         args.hrf = args.custom_hrf
-
+    
     if args.bold_file_type[0] != ".":
         args.bold_file_type = "." + args.bold_file_type
-    if (args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz"):
+    if args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz":
+        imagetype = "nifti"
         if (not args.brain_mask) or (not args.brain_mask.is_file()):
             parser.error("If the bold file type is volumetric data, a valid '--brain_mask' option must also be supplied")
-    elif args.brain_mask:
-        args.brain_mask = None
+    else:
+        imagetype = "cifti"
 
     if args.parcellate:
         if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
@@ -951,6 +953,7 @@ def main():
                 if flags.debug:
                     cleanimg, img_suffix = create_image(
                         data=func_data,
+                        imagetype=imagetype,
                         brain_mask=args.brain_mask,
                         tr=tr,
                         header=img_header
@@ -1010,6 +1013,7 @@ def main():
                     # save out the BOLD data after nuisance regression
                     nrimg, img_suffix = create_image(
                         data=func_data,
+                        imagetype=imagetype,
                         brain_mask=args.brain_mask,
                         tr=tr,
                         header=img_header
@@ -1026,6 +1030,7 @@ def main():
                     for i, noise_col in enumerate(noise_regression_df.columns):
                         beta_img, img_suffix = create_image(
                             data=np.expand_dims(nuisance_betas[i,:], axis=0),
+                            imagetype=imagetype,
                             brain_mask=args.brain_mask,
                             tr=tr,
                             header=img_header
@@ -1055,6 +1060,7 @@ def main():
                 if flags.debug:
                     cleanimg, img_suffix = create_image(
                         data=func_data,
+                        imagetype=imagetype,
                         brain_mask=args.brain_mask,
                         tr=tr,
                         header=img_header
@@ -1132,6 +1138,7 @@ def main():
             elif c in trial_types:
                 beta_img, img_suffix = create_image(
                     data=np.expand_dims(activation_betas[i,:], axis=0),
+                    imagetype=imagetype,
                     brain_mask=args.brain_mask,
                     tr=tr,
                     header=img_header
@@ -1161,6 +1168,7 @@ def main():
                     beta_frames[f,:] = activation_betas[beta_column,:]
                     beta_img, img_suffix = create_image(
                         data=np.expand_dims(activation_betas[beta_column,:], axis=0),
+                        imagetype=imagetype,
                         brain_mask=args.brain_mask,
                         tr=tr,
                         header=img_header
@@ -1184,6 +1192,7 @@ def main():
 
                 beta_img, img_suffix = create_image(
                     data=beta_frames,
+                    imagetype=imagetype,
                     brain_mask=args.brain_mask,
                     tr=tr,
                     header=img_header
@@ -1203,6 +1212,7 @@ def main():
             for i, noise_col in nuisance_cols:
                 beta_img, img_suffix = create_image(
                     data=np.expand_dims(activation_betas[i,:], axis=0),
+                    imagetype=imagetype,
                     brain_mask=args.brain_mask,
                     tr=tr,
                     header=img_header
@@ -1227,6 +1237,7 @@ def main():
             # save out residuals of GLM
             resid_img, img_suffix = create_image(
                 data=func_residual,
+                imagetype=imagetype,
                 brain_mask=args.brain_mask,
                 tr=tr,
                 header=img_header
