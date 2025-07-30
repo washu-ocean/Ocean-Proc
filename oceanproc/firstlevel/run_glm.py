@@ -807,10 +807,11 @@ def main():
         brain_mask = args.brain_mask
         if imagetype == "nifti" and (not brain_mask or not brain_mask.is_file()):
             if args.func_space:
-                master_mask_path = bold_files[0].parent / f"sub-{args.subject}_ses-{args.session}_task-{args.task}_space-{args.func_space}_desc-masterbrain_mask{args.bold_file_type}"
+                brain_mask = bold_files[0].parent / f"sub-{args.subject}_ses-{args.session}_task-{args.task}_space-{args.func_space}_desc-masterbrain_mask{args.bold_file_type}"
             else:
-                master_mask_path = bold_files[0].parent / f"sub-{args.subject}_ses-{args.session}_task-{args.task}_desc-masterbrain_mask{args.bold_file_type}"
-            brain_mask = autogenerate_mask(mask_files, master_mask_path)
+                brain_mask = bold_files[0].parent / f"sub-{args.subject}_ses-{args.session}_task-{args.task}_desc-masterbrain_mask{args.bold_file_type}"
+            if not brain_mask.is_file():
+                autogenerate_mask(mask_files, brain_mask)
 
         # for each BOLD run, find the accompanying confounds file and events/events long file
         for bold_path in bold_files:
