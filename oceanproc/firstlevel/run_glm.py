@@ -868,7 +868,7 @@ def main():
 
             func_data, read_tr, read_header = load_data(
                 func_file=run_map['bold'],
-                brain_mask=args.brain_mask,
+                brain_mask=brain_mask,
                 need_tr=(not tr),
                 fwhm=args.fwhm
             )
@@ -980,7 +980,7 @@ def main():
                     cleanimg, img_suffix = create_image(
                         data=func_data,
                         imagetype=imagetype,
-                        brain_mask=args.brain_mask,
+                        brain_mask=brain_mask,
                         tr=tr,
                         header=img_header
                     )
@@ -1040,7 +1040,7 @@ def main():
                     nrimg, img_suffix = create_image(
                         data=func_data,
                         imagetype=imagetype,
-                        brain_mask=args.brain_mask,
+                        brain_mask=brain_mask,
                         tr=tr,
                         header=img_header
                     )
@@ -1057,7 +1057,7 @@ def main():
                         beta_img, img_suffix = create_image(
                             data=np.expand_dims(nuisance_betas[i,:], axis=0),
                             imagetype=imagetype,
-                            brain_mask=args.brain_mask,
+                            brain_mask=brain_mask,
                             tr=tr,
                             header=img_header
                         )
@@ -1087,7 +1087,7 @@ def main():
                     cleanimg, img_suffix = create_image(
                         data=func_data,
                         imagetype=imagetype,
-                        brain_mask=args.brain_mask,
+                        brain_mask=brain_mask,
                         tr=tr,
                         header=img_header
                     )
@@ -1165,7 +1165,7 @@ def main():
                 beta_img, img_suffix = create_image(
                     data=np.expand_dims(activation_betas[i,:], axis=0),
                     imagetype=imagetype,
-                    brain_mask=args.brain_mask,
+                    brain_mask=brain_mask,
                     tr=tr,
                     header=img_header
                 )
@@ -1195,7 +1195,7 @@ def main():
                     beta_img, img_suffix = create_image(
                         data=np.expand_dims(activation_betas[beta_column,:], axis=0),
                         imagetype=imagetype,
-                        brain_mask=args.brain_mask,
+                        brain_mask=brain_mask,
                         tr=tr,
                         header=img_header
                     )
@@ -1219,7 +1219,7 @@ def main():
                 beta_img, img_suffix = create_image(
                     data=beta_frames,
                     imagetype=imagetype,
-                    brain_mask=args.brain_mask,
+                    brain_mask=brain_mask,
                     tr=tr,
                     header=img_header
                 )
@@ -1239,7 +1239,7 @@ def main():
                 beta_img, img_suffix = create_image(
                     data=np.expand_dims(activation_betas[i,:], axis=0),
                     imagetype=imagetype,
-                    brain_mask=args.brain_mask,
+                    brain_mask=brain_mask,
                     tr=tr,
                     header=img_header
                 )
@@ -1264,7 +1264,7 @@ def main():
             resid_img, img_suffix = create_image(
                 data=func_residual,
                 imagetype=imagetype,
-                brain_mask=args.brain_mask,
+                brain_mask=brain_mask,
                 tr=tr,
                 header=img_header
             )
