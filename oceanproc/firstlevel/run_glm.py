@@ -42,15 +42,16 @@ VERSION = "1.1.3"
 
 @debug_logging
 def create_image(data: npt.ArrayLike,
+                 imagetype: str,
                  brain_mask: str = None,
                  tr: float = None,
                  header: nib.cifti2.cifti2.Cifti2Header = None):
     img = None
     suffix = ".nii"
     d32k = 32492
-    if brain_mask:
+    if imagetype == "nifti":
         img = nmask.unmask(data, brain_mask)
-    else:
+    elif imagetype == "cifti":
         ax0 = None
         if data.shape[0] > 1 and tr:
             ax0 = nib.cifti2.cifti2_axes.SeriesAxis(
@@ -560,6 +561,24 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     return (beta_data, resids)
 
 
+def autogenerate_mask(mask_files: list[Path], output_path: Path) -> Path:
+    logger.info(f"Autogenerating mask at {output_path}...")
+    if len(mask_files) == 1:
+        return mask_files[0]
+    orig_img = nib.load(mask_files[0], mmap=False)
+    fdata = orig_img.get_fdata()
+    for mask_file in mask_files[1:]:
+        fdata += nib.load(mask_file, mmap=False).get_fdata()
+    fdata[fdata >= 1] = 1
+    new_img = nib.nifti1.Nifti1Image(
+        fdata,
+        affine=orig_img.affine,
+        header=orig_img.header
+    )
+    nib.save(new_img, output_path)
+    return output_path
+
+
 def main():
     parser = OceanParser(
         prog="oceanfla",
@@ -633,7 +652,7 @@ def main():
                                   help="The framewise displacement threshold used when censoring high-motion frames")
     config_arguments.add_argument("--minimum_unmasked_neighbors", type=int, default=None,
                                   help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
-    config_arguments.add_argument("--tmask", action= argparse.BooleanOptionalAction, 
+    config_arguments.add_argument("--tmask", action=argparse.BooleanOptionalAction,
                                   help="Flag to indicate that tmask files, if found with the preprocessed outputs, should be used. Tmask files will override framewise displacement threshold censoring if applicable.")
     config_arguments.add_argument("--repetition_time", "-tr", type=float,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
@@ -688,11 +707,10 @@ def main():
 
     if args.bold_file_type[0] != ".":
         args.bold_file_type = "." + args.bold_file_type
-    if (args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz"):
-        if (not args.brain_mask) or (not args.brain_mask.is_file()):
-            parser.error("If the bold file type is volumetric data, a valid '--brain_mask' option must also be supplied")
-    elif args.brain_mask:
-        args.brain_mask = None
+    if args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz":
+        imagetype = "nifti"
+    else:
+        imagetype = "cifti"
 
     if args.parcellate:
         if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
@@ -776,13 +794,23 @@ def main():
         preproc_derivs = args.derivs_dir / args.preproc_subfolder
         if args.func_space:
             bold_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*space-{args.func_space}*bold{args.bold_file_type}"))
+            mask_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*space-{args.func_space}*desc-brain_mask{args.bold_file_type}"))
         else:
             bold_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*bold{args.bold_file_type}"))
+            mask_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*desc-brain_mask{args.bold_file_type}"))
         assert len(bold_files) > 0, "Did not find any bold files in the given derivatives directory for the specified task and file type"
 
-        if args.parcellate and (args.bold_file_type == ".dtseries.nii"):
+        if args.parcellate and imagetype == "cifti":
             bold_files = [parcellate_dtseries(dtseries_path=dt, parc_dlabel_path=args.parcellate) for dt in bold_files]
             args.bold_file_type = ".ptseries.nii"
+
+        brain_mask = args.brain_mask
+        if imagetype == "nifti" and (not brain_mask or not brain_mask.is_file()):
+            if args.func_space:
+                master_mask_path = bold_files[0].parent / f"sub-{args.subject}_ses-{args.session}_task-{args.task}_space-{args.func_space}_desc-masterbrain_mask{args.bold_file_type}"
+            else:
+                master_mask_path = bold_files[0].parent / f"sub-{args.subject}_ses-{args.session}_task-{args.task}_desc-masterbrain_mask{args.bold_file_type}"
+            brain_mask = autogenerate_mask(mask_files, master_mask_path)
 
         # for each BOLD run, find the accompanying confounds file and events/events long file
         for bold_path in bold_files:
@@ -840,7 +868,7 @@ def main():
 
             func_data, read_tr, read_header = load_data(
                 func_file=run_map['bold'],
-                brain_mask=args.brain_mask,
+                brain_mask=brain_mask,
                 need_tr=(not tr),
                 fwhm=args.fwhm
             )
@@ -951,7 +979,8 @@ def main():
                 if flags.debug:
                     cleanimg, img_suffix = create_image(
                         data=func_data,
-                        brain_mask=args.brain_mask,
+                        imagetype=imagetype,
+                        brain_mask=brain_mask,
                         tr=tr,
                         header=img_header
                     )
@@ -1010,7 +1039,8 @@ def main():
                     # save out the BOLD data after nuisance regression
                     nrimg, img_suffix = create_image(
                         data=func_data,
-                        brain_mask=args.brain_mask,
+                        imagetype=imagetype,
+                        brain_mask=brain_mask,
                         tr=tr,
                         header=img_header
                     )
@@ -1026,7 +1056,8 @@ def main():
                     for i, noise_col in enumerate(noise_regression_df.columns):
                         beta_img, img_suffix = create_image(
                             data=np.expand_dims(nuisance_betas[i,:], axis=0),
-                            brain_mask=args.brain_mask,
+                            imagetype=imagetype,
+                            brain_mask=brain_mask,
                             tr=tr,
                             header=img_header
                         )
@@ -1055,7 +1086,8 @@ def main():
                 if flags.debug:
                     cleanimg, img_suffix = create_image(
                         data=func_data,
-                        brain_mask=args.brain_mask,
+                        imagetype=imagetype,
+                        brain_mask=brain_mask,
                         tr=tr,
                         header=img_header
                     )
@@ -1132,7 +1164,8 @@ def main():
             elif c in trial_types:
                 beta_img, img_suffix = create_image(
                     data=np.expand_dims(activation_betas[i,:], axis=0),
-                    brain_mask=args.brain_mask,
+                    imagetype=imagetype,
+                    brain_mask=brain_mask,
                     tr=tr,
                     header=img_header
                 )
@@ -1161,7 +1194,8 @@ def main():
                     beta_frames[f,:] = activation_betas[beta_column,:]
                     beta_img, img_suffix = create_image(
                         data=np.expand_dims(activation_betas[beta_column,:], axis=0),
-                        brain_mask=args.brain_mask,
+                        imagetype=imagetype,
+                        brain_mask=brain_mask,
                         tr=tr,
                         header=img_header
                     )
@@ -1184,7 +1218,8 @@ def main():
 
                 beta_img, img_suffix = create_image(
                     data=beta_frames,
-                    brain_mask=args.brain_mask,
+                    imagetype=imagetype,
+                    brain_mask=brain_mask,
                     tr=tr,
                     header=img_header
                 )
@@ -1203,7 +1238,8 @@ def main():
             for i, noise_col in nuisance_cols:
                 beta_img, img_suffix = create_image(
                     data=np.expand_dims(activation_betas[i,:], axis=0),
-                    brain_mask=args.brain_mask,
+                    imagetype=imagetype,
+                    brain_mask=brain_mask,
                     tr=tr,
                     header=img_header
                 )
@@ -1227,7 +1263,8 @@ def main():
             # save out residuals of GLM
             resid_img, img_suffix = create_image(
                 data=func_residual,
-                brain_mask=args.brain_mask,
+                imagetype=imagetype,
+                brain_mask=brain_mask,
                 tr=tr,
                 header=img_header
             )
