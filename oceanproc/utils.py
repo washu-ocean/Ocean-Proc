@@ -30,6 +30,23 @@ cifti_files = [
     ".pscalar.nii"
 ]
 
+
+def logger_exception_hook(exctype, value, traceback):
+    sys.__excepthook__(exctype, value, traceback)
+    logger.critical(f'Uncaught exception: {exctype.__name__} - {value}')
+    while traceback:
+        filename = traceback.tb_frame.f_code.co_filename
+        name = traceback.tb_frame.f_code.co_name
+        line_no = traceback.tb_lineno
+        traceback = traceback.tb_next
+        if traceback:
+            logger.critical(f"File {filename} line {line_no}, in {name}")
+
+    # Where the exception occured
+    logger.exception(f"File {filename} line {line_no}, in {name}", exc_info=(exctype, value, traceback))
+sys.excepthook = logger_exception_hook
+
+
 def takes_arguments(decorator):
     """
     A meta-decorator to use on decorators that take in other
