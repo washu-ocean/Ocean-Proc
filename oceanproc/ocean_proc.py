@@ -156,6 +156,22 @@ def main():
                 parser.error(f"Cannot find the xml file at the path: {xml_file}")
             
 
+    preproc_image = f"{defaults.image_name}:{args.image_version}"
+    preproc_derivs_path = args.derivs_path / args.derivs_subfolder
+
+    log_dir = preproc_derivs_path / f"sub-{args.subject}/log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"sub-{args.subject}_ses-{args.session}_oceanproc_desc-{datetime.datetime.now().strftime('%m-%d-%y_%I-%M%p')}.log"
+    add_file_handler(logger, log_path)
+    if args.debug_mode:
+        flags.debug = True
+        logger.setLevel(logging.DEBUG)
+
+
+    logger.info("Starting oceanproc...")
+    logger.info(f"Log will be stored at {log_path}")
+
+
     ##### Export the current configuration arguments to a file #####
     if args.export_args:
         try:
@@ -167,26 +183,12 @@ def main():
             exit_program_early(e)
     
 
-    preproc_image = f"{defaults.image_name}:{args.image_version}"
-    preproc_derivs_path = args.derivs_path / args.derivs_subfolder
-
-    log_dir = preproc_derivs_path / f"sub-{args.subject}/log"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"sub-{args.subject}_ses-{args.session}_oceanproc_desc-{datetime.datetime.now().strftime('%m-%d-%y_%I-%M%p')}.log"
-    add_file_handler(logger, log_path)
-
-    if args.debug_mode:
-        flags.debug = True
-        logger.setLevel(logging.DEBUG)
     if args.longitudinal:
         flags.longitudinal = True
     if args.infant:
         flags.infant = True
     
-
-    logger.info("Starting oceanproc...")
-    logger.info(f"Log will be stored at {log_path}")
-
+    
     # log the input arguments
     for k,v in (dict(args._get_kwargs())).items():
         logger.info(f" {k} : {v}")
