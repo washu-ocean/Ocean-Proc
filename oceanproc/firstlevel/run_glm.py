@@ -994,7 +994,7 @@ def main():
                     unmodified_output_dir_contents.discard(cleaned_filename)
 
             # nuisance regression if specified
-            if args.highpass is not None or args.lowpass is not None:
+            if (args.highpass is not None or args.lowpass is not None) and "mean" not in args.nuisance_regression:
                 logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
                 args.nuisance_regression.append("mean")
             if len(args.nuisance_regression) > 0:
