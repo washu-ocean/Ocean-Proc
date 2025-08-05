@@ -367,8 +367,8 @@ def filter_data(func_data: npt.ArrayLike,
                 tr: float,
                 low_pass: float = 0.1,
                 high_pass: float = 0.008,
-                padtype: str = "odd",
-                padlen: int = None):
+                padtype: str = "zero",
+                padlen: int = 50):
     """
     Apply a lowpass, highpass, or bandpass filter to the functional data. Masked frames
     are interploated using a cubic splice function before filtering. The returned array
@@ -668,7 +668,7 @@ def main():
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=int,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
-    config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*",
+    config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
                                   help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
                                   all nuisance/confound variables will be included""")
     config_arguments.add_argument("--nuisance_fd", "-nf", type=float,
@@ -994,7 +994,10 @@ def main():
                     unmodified_output_dir_contents.discard(cleaned_filename)
 
             # nuisance regression if specified
-            if args.nuisance_regression is not None:
+            if (args.highpass is not None or args.lowpass is not None) and "mean" not in args.nuisance_regression:
+                logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
+                args.nuisance_regression.append("mean")
+            if len(args.nuisance_regression) > 0:
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
                 if args.nuisance_fd:
                     logger.info(f" censoring timepoints for nuisance regression using the framewise displacement threshold of {args.nuisance_fd}")
