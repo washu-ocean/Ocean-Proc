@@ -679,7 +679,7 @@ def main():
     config_arguments.add_argument("--lowpass", "-lp", type=float, nargs="?", const=0.1,
                                   help="""The low pass cutoff frequency for signal filtering. Frequencies above this value (Hz) will be filtered out. If the argument
                         is supplied but no value is given, then the value will default to 0.1 Hz""")
-    config_arguments.add_argument("--filter_padtype", default="odd",
+    config_arguments.add_argument("--filter_padtype", default="zero",
                                   choices=["odd", "even", "zero", "constant", "none"],
                                   help="Type of padding to use for low-, high-, or band-pass filter, if one is applied.")
     config_arguments.add_argument("--filter_padlen", type=int, default=None,
