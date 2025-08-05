@@ -682,7 +682,7 @@ def main():
     config_arguments.add_argument("--filter_padtype", default="zero",
                                   choices=["odd", "even", "zero", "constant", "none"],
                                   help="Type of padding to use for low-, high-, or band-pass filter, if one is applied.")
-    config_arguments.add_argument("--filter_padlen", type=int, default=None,
+    config_arguments.add_argument("--filter_padlen", type=int, default=50,
                                   help="Length of padding to add to the beginning and end of BOLD run before applying butterworth filter.")
     config_arguments.add_argument("--volterra_lag", "-vl", nargs="?", const=2, type=int,
                                   help="""The amount of frames to lag for a volterra expansion. If no value is specified
