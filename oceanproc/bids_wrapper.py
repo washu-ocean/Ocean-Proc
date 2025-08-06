@@ -313,6 +313,7 @@ def extend_session(subject:str,
             Path(bids_new_path).parent.resolve().mkdir(parents=True, exist_ok=True)  # Make sure folder exists if not already created (e.g. 'fmap/')
             logger.info(f"moving file: {similar_files[0].path} to: {bids_new_path}")
             shutil.move(similar_files[0].path, bids_new_path)
+            bids_layout = BIDSLayout(bids_dir, validate=False)
 
 
 @debug_logging

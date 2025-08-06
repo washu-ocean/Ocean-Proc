@@ -426,29 +426,34 @@ def filter_data(func_data: npt.ArrayLike,
     )):
         raise ValueError(f"Pad length of {padlen} incompatible with pad type {'odd' if padtype is None else padtype}")
 
+    # temporary fix for filter padding --- THIS MANUAL PADDING SEEMS TO FIX THE BIMODAL BETA DISTRIBUTION ---- ADDITIONAL TESTING MAY STILL BE NEEDED
+    padlen = 50
+    padtype = "zero"
+
+    padded_func_data = np.pad(func_data, ((padlen, padlen), (0, 0)), mode='constant', constant_values=0)
+    padded_mask = np.pad(mask, (padlen, padlen), mode='constant', constant_values=True)
+
     # if the mask is excluding frames, interpolate the censored frames
     if np.sum(mask) < mask.shape[0]:
-        func_data, _, mask = _handle_scrubbed_volumes(
-            signals=func_data,
+        padded_func_data, _, padded_mask = _handle_scrubbed_volumes(
+            signals=padded_func_data,
             confounds=None,
-            sample_mask=mask,
+            sample_mask=padded_mask,
             filter_type="butterworth",
             t_r=tr,
             extrapolate=True
         )
 
     if padtype == "zero":
-        padded_func_data = np.pad(func_data, ((1, 1), (0, 0)), mode='constant', constant_values=0)
-        if padlen is not None:
-            padlen -= 2
+        # padded_func_data = np.pad(func_data, ((padlen, padlen), (0, 0)), mode='constant', constant_values=0)
+        # if padlen is not None:
+        #     padlen -= 2
         filtered_data = butterworth(
             signals=padded_func_data,
             sampling_rate=1.0 / tr,
             low_pass=low_pass,
             high_pass=high_pass,
-            padtype="constant",
-            padlen=padlen
-        )[1:-1, :]  # remove 0-pad frames on both sides
+        )[padlen:-padlen, :]  # remove 0-pad frames on both sides
         assert filtered_data.shape[0] == func_data.shape[0], "Filtered data must have the same number of timepoints as the original functional data"
     else:
         filtered_data = butterworth(
@@ -703,7 +708,6 @@ def main():
     if args.custom_hrf:
         if not (args.custom_hrf.exists() and args.custom_hrf.suffix == ".txt"):
             parser.error("The 'custom_hrf' argument must be a file of type '.txt' and must exist")
-        args.hrf = args.custom_hrf
 
     if args.bold_file_type[0] != ".":
         args.bold_file_type = "." + args.bold_file_type
@@ -892,7 +896,7 @@ def main():
                 events_long=events_long,
                 fir=args.fir,
                 fir_list=args.fir_vars if args.fir_vars else None,
-                hrf=args.hrf,
+                hrf=args.custom_hrf if args.custom_hrf else args.hrf,
                 hrf_list=args.hrf_vars if args.hrf_vars else None,
                 unmodeled_list=args.unmodeled
             )
@@ -993,10 +997,16 @@ def main():
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
 
-            # nuisance regression if specified
-            if (args.highpass is not None or args.lowpass is not None) and "mean" not in args.nuisance_regression:
-                logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
-                args.nuisance_regression.append("mean")
+            # demean and detrend if filtering is requested
+            if (args.highpass is not None or args.lowpass is not None):
+                if "mean" not in args.nuisance_regression:
+                    logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
+                    args.nuisance_regression.append("mean")
+                if "trend" not in args.nuisance_regression:
+                    logger.warning("High-, low-, or band-pass specified, but trend not specified as nuisance regressor -- adding this in automatically")
+                    args.nuisance_regression.append("trend")
+
+            # nuisance regression if specified        
             if len(args.nuisance_regression) > 0:
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
                 if args.nuisance_fd:
@@ -1025,9 +1035,10 @@ def main():
                 if "mean" not in args.nuisance_regression:
                     args.nuisance_regression.append("mean")
 
-                leftover_noise_columns = [c for c in noise_columns if c not in args.nuisance_regression]
+                leftover_noise_columns = {c for c in noise_columns if c not in args.nuisance_regression}
+                leftover_noise_columns.update(["mean", "trend"])
                 noise_regression_df = noise_df.loc[:, args.nuisance_regression].copy()
-                noise_df = noise_df.loc[:, leftover_noise_columns].copy() if len(leftover_noise_columns) > 0 else None
+                noise_df = noise_df.loc[:, list(leftover_noise_columns)].copy() if len(leftover_noise_columns) > 0 else None
 
                 logger.info(" performing nuisance regression")
                 nuisance_betas, func_data_residuals = massuni_linGLM(

@@ -40,7 +40,7 @@ def logger_exception_hook(exctype, value, traceback):
         line_no = traceback.tb_lineno
         traceback = traceback.tb_next
         if traceback:
-            logger.critical(f"File {filename} line {line_no}, in {name}")
+            logger.critical(f"-- File {filename} line {line_no}, in {name} ")
 
     # Where the exception occured
     logger.exception(f"File {filename} line {line_no}, in {name}", exc_info=(exctype, value, traceback))
