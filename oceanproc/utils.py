@@ -355,8 +355,7 @@ def load_data(func_file: str|Path,
                 img = smooth_img(img, fwhm)
             return (nmask.apply_mask(img, brain_mask), tr, None)
         else:
-            raise Exception("Volumetric data must also have an accompanying brain mask")
-            # return None 
+            raise RuntimeError("Volumetric data must also have an accompanying brain mask")
 
 
 def parcellate_dtseries(dtseries_path: Path, 

@@ -12,7 +12,7 @@ import nibabel as nib
 # from nilearn.plotting import plot_design_matrix
 # import matplotlib.pyplot as plt
 import nilearn.masking as nmask
-from nilearn.signal import butterworth, _handle_scrubbed_volumes
+from nilearn.signal import butterworth, _handle_scrubbed_volumes, clean
 from scipy import signal
 from scipy.stats import gamma
 from ..oceanparse import OceanParser
@@ -208,7 +208,7 @@ def make_noise_ts(confounds_file: str,
                   linear_trend: bool = False,
                   spike_threshold: float = None,
                   volterra_expansion: int = None,
-                  volterra_columns: list = None):
+                  volterra_columns: list = None) -> pd.DataFrame:
     select_columns = set(confounds_columns)
     fd = "framewise_displacement"
     if volterra_columns:
@@ -832,19 +832,12 @@ def main():
                 else:
                     file_map["tmask"] = tmask_files[0]
 
-            if args.events_long:
-                events_long_search_path = f"{bold_base}*_desc*events_long.csv"
-                glob_path = args.raw_bids / f"**/{events_long_search_path}"
-                events_long_files = list(args.events_long.glob(f"**/{events_long_search_path}"))
-                assert len(events_long_files) == 1, f"Found {len(events_long_files)} events long files for bold run: {str(bold_path)} search path: {str(glob_path)}"
-                file_map["events"] = events_long_files[0]
-            else:
-                event_search_path = f"{bold_base}*_events.tsv"
-                glob_path = args.raw_bids / f"**/{event_search_path}"
-                event_files = list(args.raw_bids.glob("**/" + event_search_path))
-                assert len(event_files) == 1, f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(glob_path)}"
-                file_map["events"] = event_files[0]
-
+            # find eventfile or long eventfile if specified
+            event_search_path = f"{bold_base}*_desc*events{'_long' if args.events_long else ''}.tsv"
+            glob_path = args.raw_bids / f"**/{event_search_path}"
+            event_files = list(args.raw_bids.glob("**/" + event_search_path))
+            assert len(event_files) == 1, f"Found {len(event_files)} {'long' if args.events_long else ''} event files for bold run: {str(bold_path)} search path: {str(glob_path)}"
+            file_map["events"] = event_files[0]
             file_map_list.append(file_map)
 
         tr = args.repetition_time
@@ -969,30 +962,6 @@ def main():
                 events_df.to_csv(events_df_filename)
                 unmodified_output_dir_contents.discard(events_df_filename)
 
-            # detrend the BOLD data if specifed
-            if args.detrend_data:
-                logger.info(" detrending the BOLD data")
-                func_data_detrend = demean_detrend(
-                    func_data=func_data
-                )
-                run_map["data_detrend"] = func_data_detrend
-                func_data = func_data_detrend
-                if flags.debug:
-                    cleanimg, img_suffix = create_image(
-                        data=func_data,
-                        imagetype=imagetype,
-                        brain_mask=brain_mask,
-                        tr=tr,
-                        header=img_header
-                    )
-                    cleaned_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_detrended{img_suffix}"
-                    logger.debug(f" saving BOLD data after detrending to file: {cleaned_filename}")
-                    nib.save(
-                        cleanimg,
-                        cleaned_filename
-                    )
-                    unmodified_output_dir_contents.discard(cleaned_filename)
-
             # nuisance regression if specified
             if (args.highpass is not None or args.lowpass is not None) and "mean" not in args.nuisance_regression:
                 logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
@@ -1029,80 +998,106 @@ def main():
                 noise_regression_df = noise_df.loc[:, args.nuisance_regression].copy()
                 noise_df = noise_df.loc[:, leftover_noise_columns].copy() if len(leftover_noise_columns) > 0 else None
 
-                logger.info(" performing nuisance regression")
-                nuisance_betas, func_data_residuals = massuni_linGLM(
-                    func_data=func_data,
-                    design_matrix=noise_regression_df,
-                    mask=nuisance_mask
-                )
-
-                run_map["data_resids"] = func_data_residuals
-                func_data = func_data_residuals
-
-                if flags.debug:
-                    # save out the BOLD data after nuisance regression
-                    nrimg, img_suffix = create_image(
-                        data=func_data,
-                        imagetype=imagetype,
-                        brain_mask=brain_mask,
-                        tr=tr,
-                        header=img_header
-                    )
-                    nr_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_nuisance-regressed{img_suffix}"
-                    logger.debug(f" saving BOLD data after nuisance regression to file: {nr_filename}")
-                    nib.save(
-                        nrimg,
-                        nr_filename
-                    )
-                    unmodified_output_dir_contents.discard(nr_filename)
-
-                    # save out the nuisance betas
-                    for i, noise_col in enumerate(noise_regression_df.columns):
-                        beta_img, img_suffix = create_image(
-                            data=np.expand_dims(nuisance_betas[i,:], axis=0),
-                            imagetype=imagetype,
-                            brain_mask=brain_mask,
-                            tr=tr,
-                            header=img_header
-                        )
-                        beta_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}-beta-{noise_col}-frame-0{user_desc}{img_suffix}"
-                        logger.debug(f" saving betas for nuisance variable: {noise_col} to file: {beta_filename}")
-                        nib.save(
-                            beta_img,
-                            beta_filename
-                        )
-                        unmodified_output_dir_contents.discard(beta_filename)
+                # logger.info(" performing nuisance regression")
+                # nuisance_betas, func_data_residuals = massuni_linGLM(
+                #     func_data=func_data,
+                #     design_matrix=noise_regression_df,
+                #     mask=nuisance_mask
+                # )
+                #
+                # run_map["data_resids"] = func_data_residuals
+                # func_data = func_data_residuals
+                #
+                # if flags.debug:
+                #     # save out the BOLD data after nuisance regression
+                #     nrimg, img_suffix = create_image(
+                #         data=func_data,
+                #         imagetype=imagetype,
+                #         brain_mask=brain_mask,
+                #         tr=tr,
+                #         header=img_header
+                #     )
+                #     nr_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_nuisance-regressed{img_suffix}"
+                #     logger.debug(f" saving BOLD data after nuisance regression to file: {nr_filename}")
+                #     nib.save(
+                #         nrimg,
+                #         nr_filename
+                #     )
+                #     unmodified_output_dir_contents.discard(nr_filename)
+                #
+                #     # save out the nuisance betas
+                #     for i, noise_col in enumerate(noise_regression_df.columns):
+                #         beta_img, img_suffix = create_image(
+                #             data=np.expand_dims(nuisance_betas[i,:], axis=0),
+                #             imagetype=imagetype,
+                #             brain_mask=brain_mask,
+                #             tr=tr,
+                #             header=img_header
+                #         )
+                #         beta_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}-beta-{noise_col}-frame-0{user_desc}{img_suffix}"
+                #         logger.debug(f" saving betas for nuisance variable: {noise_col} to file: {beta_filename}")
+                #         nib.save(
+                #             beta_img,
+                #             beta_filename
+                #         )
+                #         unmodified_output_dir_contents.discard(beta_filename)
 
             # filter the data if specified
-            if args.lowpass or args.highpass:
-                logger.info(f" filtering the BOLD data with a highpass of {args.highpass} and a lowpass of {args.lowpass}")
-                func_data_filtered = filter_data(
-                    func_data=func_data,
-                    mask=run_mask,
+            # if args.lowpass or args.highpass:
+            #     logger.info(f" filtering the BOLD data with a highpass of {args.highpass} and a lowpass of {args.lowpass}")
+            #     func_data_filtered = filter_data(
+            #         func_data=func_data,
+            #         mask=run_mask,
+            #         tr=tr,
+            #         low_pass=args.lowpass if args.lowpass else None,
+            #         high_pass=args.highpass if args.highpass else None,
+            #         padtype=args.filter_padtype,
+            #         padlen=args.filter_padlen,
+            #     )
+            #     run_map["data_filtered"] = func_data_filtered
+            #     func_data = func_data_filtered
+            #     if flags.debug:
+            #         cleanimg, img_suffix = create_image(
+            #             data=func_data,
+            #             imagetype=imagetype,
+            #             brain_mask=brain_mask,
+            #             tr=tr,
+            #             header=img_header
+            #         )
+            #         filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered{img_suffix}"
+            #         logger.debug(f" saving BOLD data after filtering to file: {filtered_filename}")
+            #         nib.save(
+            #             cleanimg,
+            #             filtered_filename
+            #         )
+            #         unmodified_output_dir_contents.discard(filtered_filename)
+            logger.info(f"{func_data.shape[0]=}")
+            logger.info("Cleaning signal...")
+            func_data_cleaned = clean(
+                func_data,
+                sample_mask=run_mask,
+                t_r=tr,
+                confounds=noise_regression_df if len(noise_regression_df) > 0 else None,
+                low_pass=args.lowpass if args.lowpass else None,
+                high_pass=args.highpass if args.highpass else None,
+            )
+            if args.debug:
+                cleanimg, img_suffix = create_image(
+                    data=func_data_cleaned,
+                    imagetype=imagetype,
+                    brain_mask=brain_mask,
                     tr=tr,
-                    low_pass=args.lowpass if args.lowpass else None,
-                    high_pass=args.highpass if args.highpass else None,
-                    padtype=args.filter_padtype,
-                    padlen=args.filter_padlen,
+                    header=img_header
                 )
-                run_map["data_filtered"] = func_data_filtered
-                func_data = func_data_filtered
-                if flags.debug:
-                    cleanimg, img_suffix = create_image(
-                        data=func_data,
-                        imagetype=imagetype,
-                        brain_mask=brain_mask,
-                        tr=tr,
-                        header=img_header
-                    )
-                    filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered{img_suffix}"
-                    logger.debug(f" saving BOLD data after filtering to file: {filtered_filename}")
-                    nib.save(
-                        cleanimg,
-                        filtered_filename
-                    )
-                    unmodified_output_dir_contents.discard(filtered_filename)
-
+                filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered{img_suffix}"
+                logger.debug(f" saving BOLD data after filtering to file: {filtered_filename}")
+                nib.save(
+                    cleanimg,
+                    filtered_filename
+                )
+            inverted_run_mask = [not n for n in run_mask]
+            func_data[np.array(inverted_run_mask)] = 0
+            func_data[np.array(run_mask)] = func_data_cleaned
             # apppend the run-wise data to the session list
             if noise_df is not None:
                 assert func_data.shape[0] == len(noise_df), "The functional data and the nuisance matrix have a different number of timepoints"
