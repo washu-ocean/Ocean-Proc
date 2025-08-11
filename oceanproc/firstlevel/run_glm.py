@@ -1082,7 +1082,7 @@ def main():
                 high_pass=args.highpass if args.highpass else None,
             )
             func_data_interp = _handle_scrubbed_volumes(func_data,
-                                                        confounds=noise_regression_df if noise_regression_df else None,
+                                                        confounds=None,
                                                         sample_mask=run_mask,
                                                         filter_type="butterworth",
                                                         t_r=tr,
