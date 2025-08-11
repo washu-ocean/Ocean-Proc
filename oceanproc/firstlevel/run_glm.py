@@ -1081,9 +1081,18 @@ def main():
                 low_pass=args.lowpass if args.lowpass else None,
                 high_pass=args.highpass if args.highpass else None,
             )
+            func_data_interp = _handle_scrubbed_volumes(func_data,
+                                                        confounds=noise_regression_df if noise_regression_df else None,
+                                                        sample_mask=run_mask,
+                                                        filter_type="butterworth",
+                                                        t_r=tr,
+                                                        extrapolate=True)
+            inverted_run_mask = [not n for n in run_mask]
+            func_data[np.array(inverted_run_mask)] = func_data_interp[np.array(inverted_run_mask)]
+            func_data[np.array(run_mask)] = func_data_cleaned
             if args.debug:
                 cleanimg, img_suffix = create_image(
-                    data=func_data_cleaned,
+                    data=func_data,
                     imagetype=imagetype,
                     brain_mask=brain_mask,
                     tr=tr,
@@ -1095,9 +1104,6 @@ def main():
                     cleanimg,
                     filtered_filename
                 )
-            inverted_run_mask = [not n for n in run_mask]
-            func_data[np.array(inverted_run_mask)] = 0
-            func_data[np.array(run_mask)] = func_data_cleaned
             # apppend the run-wise data to the session list
             if noise_df is not None:
                 assert func_data.shape[0] == len(noise_df), "The functional data and the nuisance matrix have a different number of timepoints"
