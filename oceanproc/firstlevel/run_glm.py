@@ -1073,23 +1073,20 @@ def main():
             #         unmodified_output_dir_contents.discard(filtered_filename)
             logger.info(f"{func_data.shape[0]=}")
             logger.info("Cleaning signal...")
+            func_data_interp, _, _ = _handle_scrubbed_volumes(func_data,
+                                                              confounds=None,
+                                                              sample_mask=run_mask,
+                                                              filter_type="butterworth",
+                                                              t_r=tr,
+                                                              extrapolate=True)
             func_data_cleaned = clean(
-                func_data,
-                sample_mask=run_mask,
+                func_data_interp,
                 t_r=tr,
                 confounds=noise_regression_df if len(noise_regression_df) > 0 else None,
                 low_pass=args.lowpass if args.lowpass else None,
                 high_pass=args.highpass if args.highpass else None,
             )
-            func_data_interp = _handle_scrubbed_volumes(func_data,
-                                                        confounds=None,
-                                                        sample_mask=run_mask,
-                                                        filter_type="butterworth",
-                                                        t_r=tr,
-                                                        extrapolate=True)
-            inverted_run_mask = [not n for n in run_mask]
-            func_data[np.array(inverted_run_mask)] = func_data_interp[np.array(inverted_run_mask)]
-            func_data[np.array(run_mask)] = func_data_cleaned
+            func_data = func_data_cleaned
             if args.debug:
                 cleanimg, img_suffix = create_image(
                     data=func_data,
