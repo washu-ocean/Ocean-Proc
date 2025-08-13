@@ -679,10 +679,10 @@ def main():
     config_arguments.add_argument("--lowpass", "-lp", type=float, nargs="?", const=0.1,
                                   help="""The low pass cutoff frequency for signal filtering. Frequencies above this value (Hz) will be filtered out. If the argument
                         is supplied but no value is given, then the value will default to 0.1 Hz""")
-    config_arguments.add_argument("--filter_padtype", default="zero",
+    config_arguments.add_argument("--filter_padtype",
                                   choices=["odd", "even", "zero", "constant", "none"],
                                   help="Type of padding to use for low-, high-, or band-pass filter, if one is applied.")
-    config_arguments.add_argument("--filter_padlen", type=int, default=50,
+    config_arguments.add_argument("--filter_padlen", type=int,
                                   help="Length of padding to add to the beginning and end of BOLD run before applying butterworth filter.")
     config_arguments.add_argument("--volterra_lag", "-vl", nargs="?", const=2, type=int,
                                   help="""The amount of frames to lag for a volterra expansion. If no value is specified
@@ -1079,12 +1079,25 @@ def main():
                                                               filter_type="butterworth",
                                                               t_r=tr,
                                                               extrapolate=True)
+            clean_args = {
+                "t_r": tr,
+                "confounds": noise_regression_df if len(noise_regression_df) > 0 else None,
+                "low_pass": args.lowpass if args.lowpass else None,
+                "high_pass": args.highpass if args.highpass else None
+            }
+            if args.filter_padtype:
+                if args.filter_padtype == "zero":
+                    func_data_interp = np.pad(func_data_interp, ((1, 1), (0, 0)), mode='constant', constant_values=0)
+                    if args.filter_padlen is not None:
+                        args.filter_padlen -= 2
+                    clean_args["butterworth_padtype"] = "constant"
+                else:
+                    clean_args["butterworth_padtype"] = args.filter_padtype
+            if args.filter_padlen:
+                clean_args["butterworth_padlen"] = args.filter_padlen
             func_data_cleaned = clean(
                 func_data_interp,
-                t_r=tr,
-                confounds=noise_regression_df if len(noise_regression_df) > 0 else None,
-                low_pass=args.lowpass if args.lowpass else None,
-                high_pass=args.highpass if args.highpass else None,
+                **clean_args
             )
             func_data = func_data_cleaned
             if args.debug:
