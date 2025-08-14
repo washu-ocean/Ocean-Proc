@@ -217,7 +217,8 @@ def main():
                 nordic_config=args.nordic_config,
                 nifti=args.nifti,
                 skip_validate=args.skip_bids_validation,
-                skip_prompt = index > 0
+                skip_prompt = index > 0,
+                session_index=index
             )
             if index > 0:
                 extend_session(subject=args.subject,

@@ -12,6 +12,7 @@ import xml.etree.ElementTree as et
 from .utils import exit_program_early, prompt_user_continue, prepare_subprocess_logging, debug_logging, log_linebreak, flags, run_subprocess
 import logging
 from bids import BIDSLayout
+from bisect import bisect
 module_logger = logging.getLogger("fsspec")
 module_logger.setLevel(logging.CRITICAL)
 
@@ -234,6 +235,26 @@ def run_dcm2niix(source_dir:Path,
             os.remove(f)
 
 
+def add_localizer_to_sidecar(nifti_dir:Path, session_number:int = 0):
+    logger.info("####### Adding localizer block number to sidecar files #######\n")
+    session_jsons = sorted(nifti_dir.glob("*.json"))
+    localizer_series = list()
+    for sidecar in session_jsons:
+        with open(sidecar, "r") as f:
+            jd = json.load(f)
+            if "localizer" in str(jd["SeriesDescription"]).lower():
+                localizer_series.append(jd["SeriesNumber"])
+    
+    localizer_series.sort()
+    for sidecar in session_jsons:
+        jd = None
+        with open(sidecar, "r") as f:
+            jd = json.load(f)
+        jd["localizer_block"] = f"{session_number}-{bisect(localizer_series, jd["SeriesNumber"])}"
+        with sidecar.open("w") as f:
+            json.dump(jd, f, indent=4)
+
+
 def match_xml_to_nifti(nifti_dir:Path, xml_path:Path):
     logger.info("####### Matching the correct xml file and usability to each session #######\n")
     if not xml_path.exists():
@@ -326,7 +347,8 @@ def dicom_to_bids(subject:str,
                   nordic_config:Path = None,
                   nifti:bool = False,
                   skip_validate:bool = False,
-                  skip_prompt:bool = False):
+                  skip_prompt:bool = False,
+                  session_index:int = 0):
     """
     Facilitates the conversion of DICOM data into NIFTI data in BIDS format, and the removal of data marked 'unusable'.
 
@@ -336,7 +358,7 @@ def dicom_to_bids(subject:str,
     :type session: str
     :param source_dir: Path to 'sourcedata' directory (or wherever DICOM data is kept).
     :type source_dir: pathlib.Path
-    :param bids_dir: Path to the bids directory to store the newly made NIFTI files
+    :param bids_dir: Path to the bids directory to store the newly made NIFTI  files
     :type bids_dir: pathlib.Path
     :param bids_config: Path to dcm2bids config file, which maps raw sourcedata to BIDS-compliant counterpart
     :type bids_config: pathlib.Path
@@ -384,6 +406,9 @@ def dicom_to_bids(subject:str,
     # if flags.longitudinal:
     #     match_xml_to_nifti(nifti_dir=nifti_path,
     #                        xml_path=xml_path)
+
+    add_localizer_to_sidecar(nifti_dir=nifti_path, 
+                             session_number=session_index)
 
     match_xml_to_nifti(nifti_dir=nifti_path,
                        xml_path=xml_path)
