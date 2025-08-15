@@ -45,12 +45,15 @@ def get_locals_from_xml(xml_path: Path) -> tuple[set, str]:
             localizers.add((acq_time, series_id))
     return (sorted(localizers), study_id)
 
+def get_empty_group():
+    return {"task":set(), "fmapAP": set(), "fmapPA": set()}
+
 
 def get_func_from_bids(bids_layout: BIDSLayout,
                        subject:str,
                        session:str,
-                       localizers: set,
-                       study_id:str,
+                    #    localizers: set,
+                    #    study_id:str,
                        groupings: list[dict[str:set]]):
 
     func_files = bids_layout.get(subject=subject, session=session, suffix="bold", datatype="func", extension="nii.gz")
@@ -58,24 +61,29 @@ def get_func_from_bids(bids_layout: BIDSLayout,
         exit_program_early("Could not find any functional BOLD files for this subject and session.")
 
     for bold_file in func_files:
-        if flags.longitudinal and bold_file.entities["study_id"] != study_id:
-            continue
+        # if flags.longitudinal and bold_file.entities["study_id"] != study_id:
+        #     continue
 
         acq_time = datetime.strptime(bold_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
-        for i, (dt, _) in enumerate(localizers):
-            if i < len(localizers) - 1:
-                if (acq_time > dt and acq_time < localizers[i + 1][0]):
-                    groupings[i]["task"].add((bold_file, acq_time))
-                    break
-            else:
-                groupings[i]["task"].add((bold_file, acq_time))
+        localizer_block_label = bold_file.entities["localizer_block"]
+        if localizer_block_label not in groupings:
+            groupings[localizer_block_label] = get_empty_group()
+        groupings[localizer_block_label]["task"].add((bold_file, acq_time))
+
+        # for i, (dt, _) in enumerate(localizers):
+        #     if i < len(localizers) - 1:
+        #         if (acq_time > dt and acq_time < localizers[i + 1][0]):
+        #             groupings[i]["task"].add((bold_file, acq_time))
+        #             break
+        #     else:
+        #         groupings[i]["task"].add((bold_file, acq_time))
 
 
 def get_fmap_from_bids(bids_layout: BIDSLayout,
                        subject:str,
                        session:str,
-                       localizers: set,
-                       study_id:str,
+                    #    localizers: set,
+                    #    study_id:str,
                        groupings: list[dict[str:set]]):
 
     fmap_files = bids_layout.get(subject=subject, session=session, suffix="epi", datatype="fmap", extension="nii.gz")
@@ -83,18 +91,23 @@ def get_fmap_from_bids(bids_layout: BIDSLayout,
         exit_program_early("Could not find any fieldmap files for this subject and session.")
 
     for epi_file in fmap_files:
-        if flags.longitudinal and epi_file.entities["study_id"] != study_id:
-            continue
+        # if flags.longitudinal and epi_file.entities["study_id"] != study_id:
+        #     continue
 
         acq_time = datetime.strptime(epi_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
         direction = f"fmap{epi_file.entities['direction']}"
-        for i, (dt, _) in enumerate(localizers):
-            if i < len(localizers) - 1:
-                if (acq_time > dt and acq_time < localizers[i + 1][0]):
-                    groupings[i][direction].add((epi_file, acq_time))
-                    break
-            else:
-                groupings[i][direction].add((epi_file, acq_time))
+        localizer_block_label = epi_file.entities["localizer_block"]
+        if localizer_block_label not in groupings:
+            groupings[localizer_block_label] = get_empty_group()
+        groupings[localizer_block_label][direction].add((epi_file, acq_time))
+
+        # for i, (dt, _) in enumerate(localizers):
+        #     if i < len(localizers) - 1:
+        #         if (acq_time > dt and acq_time < localizers[i + 1][0]):
+        #             groupings[i][direction].add((epi_file, acq_time))
+        #             break
+        #     else:
+        #         groupings[i][direction].add((epi_file, acq_time))
 
 
 def uneven_fmap_pairing(localizer_group: dict) -> tuple:
@@ -166,33 +179,35 @@ def even_fmap_pairing(localizer_group: dict) -> tuple:
 def map_fmap_to_func(subject:str,
                      session:str,
                      bids_path:Path,
-                     xml_path: Path,
+                    #  xml_path: Path,
                      allow_uneven_fmap_groups: bool = False):
 
-    if not xml_path.is_file():
-        exit_program_early(f"Session xml file {xml_path} does not exist.")
+    # if not xml_path.is_file():
+    #     exit_program_early(f"Session xml file {xml_path} does not exist.")
 
     logger.info("####### Pairing field maps to functional runs #######\n")
 
     layout = BIDSLayout(bids_path, validate=False)
-    locals_series, study_id = get_locals_from_xml(xml_path=xml_path)
-    logger.info(f"Localizers: {locals_series}")
+    # locals_series, study_id = get_locals_from_xml(xml_path=xml_path)
+    # logger.info(f"Localizers: {locals_series}")
 
-    groups = [{"task":set(), "fmapAP": set(), "fmapPA": set()} for _ in locals_series]
+    # groups = [{"task":set(), "fmapAP": set(), "fmapPA": set()} for _ in locals_series]
+    groups = dict()
     get_func_from_bids(bids_layout=layout,
                        subject=subject,
                        session=session,
-                       localizers=locals_series,
-                       study_id=study_id,
+                    #    localizers=locals_series,
+                    #    study_id=study_id,
                        groupings=groups)
 
     get_fmap_from_bids(bids_layout=layout,
                        subject=subject,
                        session=session,
-                       localizers=locals_series,
-                       study_id=study_id,
+                    #    localizers=locals_series,
+                    #    study_id=study_id,
                        groupings=groups)
 
+    groups = list(groups.values())
     logger.info("Localizer groups: ")
     for group_num, g in enumerate(groups):
         logger.info(f"\tgroup : {group_num}")

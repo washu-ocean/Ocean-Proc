@@ -59,10 +59,12 @@ def main():
                                    help="The identifier of the session to preprocess")
     session_arguments.add_argument("--source_data", "-sd", type=Path, required=True,
                                    help="The path to the directory containing the raw DICOM files for this subject and session")
-    session_arguments.add_argument("--xml_path", "-x", type=Path, required=True,
-                                   help="The path to the xml file for this subject and session")
-    session_arguments.add_argument("--longitudinal", "-lg", type=Path, nargs=2, action="append",
-                                   help="Addtional sourcedata and xml pair to include with this BIDs subject and session")
+    # session_arguments.add_argument("--xml_path", "-x", type=Path,
+    #                                help="The path to the xml file for this subject and session")
+    session_arguments.add_argument("--usability_file", "-u", type=Path,
+                                   help="The path to the usability file for this subject and session; this file can be either be an xml or json file. All runs will be used if no file is provided.")
+    session_arguments.add_argument("--longitudinal", "-lg", type=Path, nargs="+", action="append",
+                                   help="Addtional sourcedata and usability pair to include with this BIDs subject and session")
     session_arguments.add_argument("--skip_dcm2bids", action="store_true",
                                    help="Flag to indicate that dcm2bids does not need to be run for this subject and session")
     session_arguments.add_argument("--skip_fmap_pairing", action="store_true",
@@ -149,11 +151,22 @@ def main():
         parser.error("BIBSnet working directory must exist but it cannot be found")
 
     if args.longitudinal:
-        for source_dir, xml_file in args.longitudinal:
-            if not source_dir.is_dir():
-                parser.error(f"Cannot find the souredata directory at the path: {source_dir}")
-            elif (not xml_file.is_file()) or (xml_file.suffix != ".xml"):
-                parser.error(f"Cannot find the xml file at the path: {xml_file}")
+        for lg_group in args.longitudinal:
+            if not lg_group[0].is_dir():
+                parser.error(f"Cannot find the souredata directory at the path: {lg_group[0]}")
+            if len(lg_group) == 1:
+                lg_group.append(None)
+            elif len(lg_group) == 2:
+                if not (lg_group[1].suffix in [".xml", ".json"]) or not lg_group[1].is_file():
+                    parser.error(f"usability file must be a .xml or .json file, and it must exist: {lg_group[1]}")
+            else:
+                parser.error(f"longitudinal argument cannot have more than 2 elements: {lg_group}")
+                
+        # for source_dir, xml_file in args.longitudinal:
+        #     if not source_dir.is_dir():
+        #         parser.error(f"Cannot find the souredata directory at the path: {source_dir}")
+        #     elif (not xml_file.is_file()) or (xml_file.suffix != ".xml"):
+        #         parser.error(f"Cannot find the xml file at the path: {xml_file}")
             
 
     preproc_image = f"{defaults.image_name}:{args.image_version}"
@@ -199,12 +212,12 @@ def main():
                                         session=args.session)
     bibsnet_work_dir = args.bibsnet_work if args.bibsnet_work else args.work_dir
 
-    dicom_sessions = [(args.source_data, args.xml_path, args.bids_path)]
+    dicom_sessions = [(args.source_data, args.usability_file, args.bids_path)]
     if flags.longitudinal:
-        for soure_dir, xml_file  in args.longitudinal:
-            dicom_sessions.append((soure_dir, xml_file, preproc_work_dir))
+        for soure_dir, use_file  in args.longitudinal:
+            dicom_sessions.append((soure_dir, use_file, preproc_work_dir))
 
-    for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
+    for index, (souredata_path, use_file, bids_path) in enumerate(dicom_sessions):
         ##### Convert raw DICOMs to BIDS structure #####
         if not args.skip_dcm2bids:
             dicom_to_bids(
@@ -212,7 +225,7 @@ def main():
                 session=args.session,
                 source_dir=souredata_path,
                 bids_dir=bids_path,
-                xml_path=xml_data_path,
+                usability_file=use_file,
                 bids_config=args.bids_config,
                 nordic_config=args.nordic_config,
                 nifti=args.nifti,
@@ -227,35 +240,58 @@ def main():
                                bids_dir=args.bids_path)
                 
 
-    for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
-        ##### Remove the scans marked as 'unusable' #####
-        remove_unusable_runs(
-            xml_file=xml_data_path,
-            bids_path=args.bids_path,
-            subject=args.subject,
-            session=args.session
-        )
+    ##### Remove the scans marked as 'unusable' #####
+    remove_unusable_runs(
+        bids_path=args.bids_path,
+        subject=args.subject,
+        session=args.session
+    )
 
-        ##### Pair field maps to functional runs #####
-        if not args.anat_only and not args.skip_fmap_pairing:
-            if args.fmap_pairing_file:
-                continue
-            else:
-                map_fmap_to_func(
-                    subject=args.subject,
-                    session=args.session,
-                    bids_path=args.bids_path,
-                    xml_path=xml_data_path,
-                    allow_uneven_fmap_groups=args.allow_uneven_fmap_groups
-                )
+    ##### Pair field maps to functional runs #####
+    if not args.anat_only and not args.skip_fmap_pairing:
+        if args.fmap_pairing_file:
+            bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
+            map_fmap_to_func_with_pairing_file(
+                bids_session_dir,
+                args.fmap_pairing_file
+            )
+        else:
+            map_fmap_to_func(
+                subject=args.subject,
+                session=args.session,
+                bids_path=args.bids_path,
+                # xml_path=xml_data_path,
+                allow_uneven_fmap_groups=args.allow_uneven_fmap_groups
+            )
 
-    ##### Pair field maps to functional runs with pairing file #####
-    if not args.anat_only and (not args.skip_fmap_pairing) and args.fmap_pairing_file:
-        bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
-        map_fmap_to_func_with_pairing_file(
-            bids_session_dir,
-            args.fmap_pairing_file
-        )
+    # for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
+    #     ##### Remove the scans marked as 'unusable' #####
+    #     remove_unusable_runs(
+    #         bids_path=args.bids_path,
+    #         subject=args.subject,
+    #         session=args.session
+    #     )
+
+    #     ##### Pair field maps to functional runs #####
+    #     if not args.anat_only and not args.skip_fmap_pairing:
+    #         if args.fmap_pairing_file:
+    #             continue
+    #         else:
+    #             map_fmap_to_func(
+    #                 subject=args.subject,
+    #                 session=args.session,
+    #                 bids_path=args.bids_path,
+    #                 xml_path=xml_data_path,
+    #                 allow_uneven_fmap_groups=args.allow_uneven_fmap_groups
+    #             )
+
+    # ##### Pair field maps to functional runs with pairing file #####
+    # if not args.anat_only and (not args.skip_fmap_pairing) and args.fmap_pairing_file:
+    #     bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
+    #     map_fmap_to_func_with_pairing_file(
+    #         bids_session_dir,
+    #         args.fmap_pairing_file
+    #     )
 
 
     ##### Run BIBSnet #####
