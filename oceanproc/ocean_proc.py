@@ -59,8 +59,6 @@ def main():
                                    help="The identifier of the session to preprocess")
     session_arguments.add_argument("--source_data", "-sd", type=Path, required=True,
                                    help="The path to the directory containing the raw DICOM files for this subject and session")
-    # session_arguments.add_argument("--xml_path", "-x", type=Path,
-    #                                help="The path to the xml file for this subject and session")
     session_arguments.add_argument("--usability_file", "-u", type=Path,
                                    help="The path to the usability file for this subject and session; this file can be either be an xml or json file. All runs will be used if no file is provided.")
     session_arguments.add_argument("--longitudinal", "-lg", type=Path, nargs="+", action="append",
@@ -161,12 +159,6 @@ def main():
                     parser.error(f"usability file must be a .xml or .json file, and it must exist: {lg_group[1]}")
             else:
                 parser.error(f"longitudinal argument cannot have more than 2 elements: {lg_group}")
-                
-        # for source_dir, xml_file in args.longitudinal:
-        #     if not source_dir.is_dir():
-        #         parser.error(f"Cannot find the souredata directory at the path: {source_dir}")
-        #     elif (not xml_file.is_file()) or (xml_file.suffix != ".xml"):
-        #         parser.error(f"Cannot find the xml file at the path: {xml_file}")
             
 
     preproc_image = f"{defaults.image_name}:{args.image_version}"
@@ -247,6 +239,7 @@ def main():
         session=args.session
     )
 
+
     ##### Pair field maps to functional runs #####
     if not args.anat_only and not args.skip_fmap_pairing:
         if args.fmap_pairing_file:
@@ -263,35 +256,6 @@ def main():
                 # xml_path=xml_data_path,
                 allow_uneven_fmap_groups=args.allow_uneven_fmap_groups
             )
-
-    # for index, (souredata_path, xml_data_path, bids_path) in enumerate(dicom_sessions):
-    #     ##### Remove the scans marked as 'unusable' #####
-    #     remove_unusable_runs(
-    #         bids_path=args.bids_path,
-    #         subject=args.subject,
-    #         session=args.session
-    #     )
-
-    #     ##### Pair field maps to functional runs #####
-    #     if not args.anat_only and not args.skip_fmap_pairing:
-    #         if args.fmap_pairing_file:
-    #             continue
-    #         else:
-    #             map_fmap_to_func(
-    #                 subject=args.subject,
-    #                 session=args.session,
-    #                 bids_path=args.bids_path,
-    #                 xml_path=xml_data_path,
-    #                 allow_uneven_fmap_groups=args.allow_uneven_fmap_groups
-    #             )
-
-    # ##### Pair field maps to functional runs with pairing file #####
-    # if not args.anat_only and (not args.skip_fmap_pairing) and args.fmap_pairing_file:
-    #     bids_session_dir = args.bids_path / f"sub-{args.subject}/ses-{args.session}"
-    #     map_fmap_to_func_with_pairing_file(
-    #         bids_session_dir,
-    #         args.fmap_pairing_file
-    #     )
 
 
     ##### Run BIBSnet #####

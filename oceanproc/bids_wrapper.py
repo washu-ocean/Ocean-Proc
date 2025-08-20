@@ -57,50 +57,6 @@ def remove_unusable_runs(bids_path:Path, subject:str, session:str):
             files_to_delete.add(file)
             assoc_list = set(list(file.get_associations()) + [af for assoc in file.get_associations() for af in assoc.get_associations()])
             files_to_delete.update(assoc_list)
-    
-    # if do_old_method:
-    #     if not xml_file.exists():
-    #         exit_program_early(f"Path {str(xml_file)} does not exist.")
-
-    #     tree = et.parse(xml_file)
-    #     prefix = "{" + str(tree.getroot()).split("{")[-1].split("}")[0] + "}"
-    #     scan_element_list = list(tree.iter(f"{prefix}scans"))
-    #     exp_element_list = list(tree.iter(f"{prefix}experiments"))
-    #     study_id = exp_element_list[0][0].get("study_id")
-
-    #     if len(scan_element_list) != 1:
-    #         exit_program_early("Error parsing the xml file provided. Found none or more than one scan groups")
-
-    #     scans = scan_element_list[0]
-    #     quality_pairs = {}
-    #     for s in scans:
-    #         series_id = int(s.attrib['ID'])
-    #         series_desc = s.attrib['type']
-    #         protocol_name = s.find(f"{prefix}protocolName").text
-    #         quality_info = s.find(f"{prefix}quality").text
-    #         s_key = (series_id, series_desc, protocol_name)
-    #         if s_key in quality_pairs and (quality_info == "unusable" or quality_pairs[s_key] == "unusable"):
-    #             exit_program_early(f"Found scans with identical series numbers and protocol names in the session xml file. Cannot accurately differentiate these scans {s_key}")
-    #         quality_pairs[s_key] = quality_info
-
-    #     if len(quality_pairs) == 0:
-    #         exit_program_early("Could not find scan quality information in the given xml file.")
-
-    #     logger.info("scan quality information: ")
-    #     for k, v in quality_pairs.items():
-    #         logger.info(f"\t{k} -> {v}")
-
-    #     for file in data_files:
-    #         if flags.longitudinal and file.entities["study_id"] != study_id:
-    #             continue
-    #         try:
-    #             j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["ProtocolName"])
-    #             if j_key in quality_pairs and quality_pairs[j_key] == "unusable":
-    #                 files_to_delete.add(file)
-    #                 assoc_list = set(list(file.get_associations()) + [af for assoc in file.get_associations() for af in assoc.get_associations()])
-    #                 files_to_delete.update(assoc_list)
-    #         except KeyError:
-    #             logger.warning(f"Could not find all key fields for file: \n\t NIFTI:{file.path} -- Continuing...")
 
     for file in sorted(files_to_delete, key=lambda x: x.path):
         if Path(file.path).exists():
@@ -267,7 +223,7 @@ def get_usability_from_file(usability_file:Path):
     
     return quality_pairs
 
-
+@debug_logging
 def add_information_to_sidecar(nifti_dir:Path, 
                              usability_file:Path = None, 
                              session_number:int = 0):
@@ -286,7 +242,7 @@ def add_information_to_sidecar(nifti_dir:Path,
         jd = None
         with open(sidecar, "r") as f:
             jd = json.load(f)
-        jd["localizer_block"] = f"{session_number}-{bisect(localizer_series, jd["SeriesNumber"])}"
+        jd["localizer_block"] = f"{session_number}-{bisect(localizer_series, jd['SeriesNumber'])}"
         if quality_pairs:
             if jd["SeriesNumber"] in quality_pairs:
                 jd["quality"] = quality_pairs[jd["SeriesNumber"]]
@@ -297,45 +253,6 @@ def add_information_to_sidecar(nifti_dir:Path,
             jd["quality"] = "usable"
         with sidecar.open("w") as f:
             json.dump(jd, f, indent=4)
-
-
-# def match_xml_to_nifti(nifti_dir:Path, xml_path:Path):
-#     logger.info("####### Matching the correct xml file and usability to each session #######\n")
-#     if not xml_path.exists():
-#         exit_program_early(f"Path {str(xml_path)} does not exist.")
-#     tree = et.parse(xml_path)
-#     prefix = "{" + str(tree.getroot()).split("{")[-1].split("}")[0] + "}"
-#     scan_element_list = list(tree.iter(f"{prefix}scans"))
-#     exp_element_list = list(tree.iter(f"{prefix}experiments"))
-#     study_id = exp_element_list[0][0].get("study_id")
-
-#     if len(scan_element_list) != 1:
-#         exit_program_early("Error parsing the xml file provided. Found none or more than one scan groups")
-
-#     logger.info(f"file pairing: \n\txml -> {xml_path} \n\tNIFTIs -> {nifti_dir}")   
-#     logger.info("scan quality information: ")
-#     scans = scan_element_list[0]
-#     quality_pairs = {}
-#     for s in scans:
-#         series_id = int(s.attrib['ID'])
-#         series_desc = s.attrib['type']
-#         quality_info = s.find(f"{prefix}quality").text
-#         quality_pairs[series_id] = quality_info
-#         logger.info(f"\t({series_id, series_desc}) -> {quality_info}")
-
-#     session_jsons = list(nifti_dir.glob("*.json"))
-#     for sidecar in session_jsons:
-#         jd = None
-#         with sidecar.open("r") as f:
-#             jd = json.load(f)
-#         jd["study_id"] = study_id
-#         if jd["SeriesNumber"] in quality_pairs:
-#             jd["quality"] = quality_pairs[jd["SeriesNumber"]]
-#         else:
-#             logger.warning(f"Cannot find the Series Number - {jd['SeriesNumber']} - in the session xml. Marking the file - {sidecar} - as 'unusable'")
-#             jd["quality"] = "unusable"
-#         with sidecar.open("w") as f:
-#             json.dump(jd, f, indent=4)
 
 
 @debug_logging
@@ -447,16 +364,9 @@ def dicom_to_bids(subject:str,
     else:
         nifti_path = source_dir
 
-    # if flags.longitudinal:
-    #     match_xml_to_nifti(nifti_dir=nifti_path,
-    #                        xml_path=xml_path)
-
     add_information_to_sidecar(nifti_dir=nifti_path, 
                              usability_file=usability_file,
                              session_number=session_index)
-
-    # match_xml_to_nifti(nifti_dir=nifti_path,
-    #                    xml_path=xml_path)
 
     run_dcm2bids(subject=subject,
                  session=session,
