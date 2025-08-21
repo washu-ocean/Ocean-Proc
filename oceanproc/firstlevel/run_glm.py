@@ -795,7 +795,7 @@ def main():
 
     try:
         # find all preprocessed BOLD runs for this subject and session
-        preproc_derivs = args.derivs_dir / args.preproc_subfolder
+        preproc_derivs = args.derivs_dir / args.preproc_subfolder / f"sub-{args.subject}"
         if args.func_space:
             bold_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*space-{args.func_space}*bold{args.bold_file_type}"))
             mask_files = sorted(preproc_derivs.glob(f"**/sub-{args.subject}_ses-{args.session}*task-{args.task}*space-{args.func_space}*desc-brain_mask{args.bold_file_type}"))
