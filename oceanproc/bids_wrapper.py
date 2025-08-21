@@ -72,7 +72,7 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
         scans = scan_element_list[0]
         quality_pairs = {}
         for s in scans:
-            series_id = int(s.attrib['ID'])
+            series_id = int(s.attrib['ID'].split("-")[0])
             series_desc = s.attrib['type']
             protocol_name = s.find(f"{prefix}protocolName").text
             quality_info = s.find(f"{prefix}quality").text
