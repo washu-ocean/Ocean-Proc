@@ -467,7 +467,6 @@ def filter_data(func_data: npt.ArrayLike,
 def create_final_design(data_list: list[npt.ArrayLike],
                         design_list: list[tuple[pd.DataFrame, int]],
                         noise_list: list[pd.DataFrame] = None,
-                        mask_list=None,
                         exclude_global_mean: bool = False):
     """
     Creates a final, concatenated design matrix for all functional runs in a session
@@ -496,11 +495,9 @@ def create_final_design(data_list: list[npt.ArrayLike],
     design_df_list = [t[0] for t in design_list]
     if noise_list:
         assert num_runs == len(noise_list), "There should be the same number of noise matrices and functional runs"
-        assert mask_list, "Noise list should be accompanied with mask list"
         for i in range(num_runs):
             noise_df = noise_list[i]
-            noise_df = noise_df[mask_list[i]]
-            assert len(noise_df) == len(design_df_list[i][mask_list[i]])
+            assert len(noise_df) == len(design_df_list[i])
             run_num = design_list[i][1]
             rename_dict = dict()
             for c in noise_df.columns:
@@ -519,7 +516,8 @@ def create_final_design(data_list: list[npt.ArrayLike],
 
 @debug_logging
 def massuni_linGLM(func_data: npt.ArrayLike,
-                   design_matrix: pd.DataFrame):
+                   design_matrix: pd.DataFrame,
+                   mask: npt.ArrayLike):
     """
     Compute the mass univariate GLM.
 
@@ -533,20 +531,28 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     mask: npt.ArrayLike
         Numpy array representing a mask to apply to the two other parameters
     """
-
+    
+    assert mask.shape[0] == func_data.shape[0], "the mask must be the same length as the functional data"
+    assert mask.dtype == bool
     # apply the mask to the data
     design_matrix = design_matrix.to_numpy()
+    masked_func_data = func_data.copy()[mask, :]
+    masked_design_matrix = design_matrix.copy()[mask, :]
 
     func_ss = StandardScaler()
     design_ss = StandardScaler()
 
     # standardize the masked data
-    # func_data = func_ss.fit_transform(func_data)
-    design_matrix = design_ss.fit_transform(design_matrix)
+    masked_func_data = func_ss.fit_transform(masked_func_data)
+    masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
     # comput beta values
-    inv_mat = np.linalg.pinv(design_matrix)
-    beta_data = np.dot(inv_mat, func_data)
+    inv_mat = np.linalg.pinv(masked_design_matrix)
+    beta_data = np.dot(inv_mat, masked_func_data)
+
+    # standardize the unmasked data
+    func_data = func_ss.transform(func_data)
+    design_matrix = design_ss.transform(design_matrix)
 
     # compute the residuals with unmasked data
     est_values = np.dot(design_matrix, beta_data)
@@ -660,6 +666,8 @@ def main():
                                     help="Flag to indicate that framewise displacement spike regression should be included in the nuisance matrix.")
     high_motion_params.add_argument("--fd_censoring", "-fc", action="store_true",
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
+    config_arguments.add_argument("--standardize", default=False,
+                                  help="Standardization method -- choices are 'zscore', 'zscore_sample', 'psc', or 'none' (default 'none')")
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=int,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
@@ -960,6 +968,7 @@ def main():
             if (args.highpass is not None or args.lowpass is not None) and "mean" not in args.nuisance_regression:
                 logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
                 args.nuisance_regression.append("mean")
+            noise_regression_df = None
             if len(args.nuisance_regression) > 0:
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
                 if args.nuisance_fd:
@@ -1069,12 +1078,12 @@ def main():
             logger.info("Cleaning signal...")
             clean_args = {
                 "t_r": tr,
-                "confounds": noise_regression_df if len(noise_regression_df) > 0 else None,
+                "confounds": noise_regression_df if (noise_regression_df is not None and len(noise_regression_df) > 0) else None,
                 "sample_mask": run_mask,
                 "low_pass": args.lowpass if args.lowpass else None,
                 "high_pass": args.highpass if args.highpass else None,
                 "extrapolate": False,
-                "standardize": False
+                "standardize": False if args.standardize == "none" else args.standardize
             }
             if args.filter_padtype:
                 if args.filter_padtype == "zero":
@@ -1086,10 +1095,35 @@ def main():
                     clean_args["butterworth_padtype"] = args.filter_padtype
             if args.filter_padlen:
                 clean_args["butterworth_padlen"] = args.filter_padlen
+            if args.debug:
+                cleanimg, img_suffix = create_image(
+                    data=demean_detrend(func_data),
+                    imagetype=imagetype,
+                    brain_mask=brain_mask,
+                    tr=tr,
+                    header=img_header
+                )
+                dd_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_dd{img_suffix}"
+                logger.debug(f" saving BOLD data after demeaning/detrending to file: {dd_filename}")
+                nib.save(
+                    cleanimg,
+                    dd_filename
+                )
+            interp_func_data, _, _ = _handle_scrubbed_volumes(
+                signals=demean_detrend(func_data),
+                confounds=None,
+                sample_mask=run_mask,
+                filter_type="butterworth",
+                t_r=tr,
+                extrapolate=True
+            )
             func_data = clean(
                 func_data,
                 **clean_args
             )
+            assert interp_func_data[run_mask,:].shape == func_data.shape
+            interp_func_data[run_mask,:] = func_data
+            func_data = interp_func_data
             if args.debug:
                 cleanimg, img_suffix = create_image(
                     data=func_data,
@@ -1104,6 +1138,20 @@ def main():
                     cleanimg,
                     filtered_filename
                 )
+                # interp_func_data[run_mask] = func_data[run_mask]
+                # cleaninterpimg, img_suffix = create_image(
+                #     data=interp_func_data,
+                #     imagetype=imagetype,
+                #     brain_mask=brain_mask,
+                #     tr=tr,
+                #     header=img_header
+                # )
+                # interp_filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered_interp{img_suffix}"
+                # logger.debug(f" saving BOLD data after filtering (including interpolated frames) to file: {interp_filtered_filename}")
+                # nib.save(
+                #     cleaninterpimg,
+                #     interp_filtered_filename
+                # )
             # apppend the run-wise data to the session list
             if noise_df is not None:
                 # assert func_data.shape[0] == len(noise_df), "The functional data and the nuisance matrix have a different number of timepoints"
@@ -1134,7 +1182,6 @@ def main():
             data_list=func_data_list,
             design_list=design_df_list,
             noise_list=noise_df_list if len(noise_df_list) == len(func_data_list) else None,
-            mask_list=mask_list,
             exclude_global_mean=args.no_global_mean
         )
         final_high_motion_mask = np.concat(mask_list, axis=0)
@@ -1156,7 +1203,8 @@ def main():
 
         activation_betas, func_residual = massuni_linGLM(
             func_data=final_func_data,
-            design_matrix=final_design_masked
+            design_matrix=final_design_unmasked,
+            mask=final_high_motion_mask
         )
 
         # save out the beta values
