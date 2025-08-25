@@ -12,6 +12,7 @@ import xml.etree.ElementTree as et
 from .utils import exit_program_early, prompt_user_continue, prepare_subprocess_logging, debug_logging, log_linebreak, flags, run_subprocess
 import logging
 from bids import BIDSLayout
+from bisect import bisect
 module_logger = logging.getLogger("fsspec")
 module_logger.setLevel(logging.CRITICAL)
 
@@ -22,7 +23,7 @@ remove_unusable -> relate xml and json with name and aqcuisition time (and serie
 
 
 @debug_logging
-def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str):
+def remove_unusable_runs(bids_path:Path, subject:str, session:str):
     """
     Will remove unusable scans from list of scans after dcm2bids has run.
 
@@ -46,64 +47,27 @@ def remove_unusable_runs(xml_file:Path, bids_path:Path, subject:str, session:str
             exit_program_early("Could not find any data files in the bids directory.")
 
     files_to_delete = set()
-    do_old_method = False
+    no_usability_info = set()
+    # do_old_method = False
     for file in data_files:
         if "quality" not in file.entities:
-            do_old_method = True
-            break
+            # do_old_method = True
+            no_usability_info.add(file)
         elif file.entities["quality"] == "unusable":
             files_to_delete.add(file)
             assoc_list = set(list(file.get_associations()) + [af for assoc in file.get_associations() for af in assoc.get_associations()])
             files_to_delete.update(assoc_list)
-    
-    if do_old_method:
-        if not xml_file.exists():
-            exit_program_early(f"Path {str(xml_file)} does not exist.")
-
-        tree = et.parse(xml_file)
-        prefix = "{" + str(tree.getroot()).split("{")[-1].split("}")[0] + "}"
-        scan_element_list = list(tree.iter(f"{prefix}scans"))
-        exp_element_list = list(tree.iter(f"{prefix}experiments"))
-        study_id = exp_element_list[0][0].get("study_id")
-
-        if len(scan_element_list) != 1:
-            exit_program_early("Error parsing the xml file provided. Found none or more than one scan groups")
-
-        scans = scan_element_list[0]
-        quality_pairs = {}
-        for s in scans:
-            series_id = int(s.attrib['ID'].split("-")[0])
-            series_desc = s.attrib['type']
-            protocol_name = s.find(f"{prefix}protocolName").text
-            quality_info = s.find(f"{prefix}quality").text
-            s_key = (series_id, series_desc, protocol_name)
-            if s_key in quality_pairs and (quality_info == "unusable" or quality_pairs[s_key] == "unusable"):
-                exit_program_early(f"Found scans with identical series numbers and protocol names in the session xml file. Cannot accurately differentiate these scans {s_key}")
-            quality_pairs[s_key] = quality_info
-
-        if len(quality_pairs) == 0:
-            exit_program_early("Could not find scan quality information in the given xml file.")
-
-        logger.info("scan quality information: ")
-        for k, v in quality_pairs.items():
-            logger.info(f"\t{k} -> {v}")
-
-        for file in data_files:
-            if flags.longitudinal and file.entities["study_id"] != study_id:
-                continue
-            try:
-                j_key = (file.entities["SeriesNumber"], file.entities["SeriesDescription"], file.entities["ProtocolName"])
-                if j_key in quality_pairs and quality_pairs[j_key] == "unusable":
-                    files_to_delete.add(file)
-                    assoc_list = set(list(file.get_associations()) + [af for assoc in file.get_associations() for af in assoc.get_associations()])
-                    files_to_delete.update(assoc_list)
-            except KeyError:
-                logger.warning(f"Could not find all key fields for file: \n\t NIFTI:{file.path} -- Continuing...")
 
     for file in sorted(files_to_delete, key=lambda x: x.path):
         if Path(file.path).exists():
             logger.info(f"  Removing file: {file.path}")
             os.remove(file.path)
+
+    if len(no_usability_info) > 0:
+        log_linebreak()
+        logger.warning("The following files contained no usability information and will be retained: ")
+        for file in sorted(no_usability_info, key=lambda x: x.path):
+            logger.info(f"\tfile: {file.path}")
 
 
 
@@ -234,41 +198,59 @@ def run_dcm2niix(source_dir:Path,
             os.remove(f)
 
 
-def match_xml_to_nifti(nifti_dir:Path, xml_path:Path):
-    logger.info("####### Matching the correct xml file and usability to each session #######\n")
-    if not xml_path.exists():
-        exit_program_early(f"Path {str(xml_path)} does not exist.")
-    tree = et.parse(xml_path)
-    prefix = "{" + str(tree.getroot()).split("{")[-1].split("}")[0] + "}"
-    scan_element_list = list(tree.iter(f"{prefix}scans"))
-    exp_element_list = list(tree.iter(f"{prefix}experiments"))
-    study_id = exp_element_list[0][0].get("study_id")
-
-    if len(scan_element_list) != 1:
-        exit_program_early("Error parsing the xml file provided. Found none or more than one scan groups")
-
-    logger.info(f"file pairing: \n\txml -> {xml_path} \n\tNIFTIs -> {nifti_dir}")   
-    logger.info("scan quality information: ")
-    scans = scan_element_list[0]
+def get_usability_from_file(usability_file:Path):
     quality_pairs = {}
-    for s in scans:
-        series_id = int(s.attrib['ID'])
-        series_desc = s.attrib['type']
-        quality_info = s.find(f"{prefix}quality").text
-        quality_pairs[series_id] = quality_info
-        logger.info(f"\t({series_id, series_desc}) -> {quality_info}")
+    if usability_file.suffix == ".xml":
+        tree = et.parse(usability_file)
+        prefix = "{" + str(tree.getroot()).split("{")[-1].split("}")[0] + "}"
+        scan_element_list = list(tree.iter(f"{prefix}scans"))
+        if len(scan_element_list) != 1:
+            exit_program_early("Error parsing the xml file provided. Found none or more than one scan groups")
+        scans = scan_element_list[0]
+        for s in scans:
+            series_id = int(s.attrib['ID'])
+            quality_info = s.find(f"{prefix}quality").text
+            quality_pairs[series_id] = quality_info
 
-    session_jsons = list(nifti_dir.glob("*.json"))
+    elif usability_file.suffix == ".json":
+        with open(usability_file, "r") as f:
+            jd = json.load(f)
+            quality_pairs = jd["usability"]
+
+    logger.info("scan quality information: ")
+    for series_id, quality_info in quality_pairs.items():
+        logger.info(f"\tSeries: {series_id} -> {quality_info}")
+    
+    return quality_pairs
+
+@debug_logging
+def add_information_to_sidecar(nifti_dir:Path, 
+                             usability_file:Path = None, 
+                             session_number:int = 0):
+    logger.info("####### Adding usability and localizer block number to sidecar files #######\n")
+    session_jsons = sorted(nifti_dir.glob("*.json"))
+    localizer_series = list()
+    for sidecar in session_jsons:
+        with open(sidecar, "r") as f:
+            jd = json.load(f)
+            if "localizer" in str(jd["SeriesDescription"]).lower():
+                localizer_series.append(jd["SeriesNumber"])
+    
+    localizer_series.sort()
+    quality_pairs = get_usability_from_file(usability_file=usability_file) if usability_file else False
     for sidecar in session_jsons:
         jd = None
-        with sidecar.open("r") as f:
+        with open(sidecar, "r") as f:
             jd = json.load(f)
-        jd["study_id"] = study_id
-        if jd["SeriesNumber"] in quality_pairs:
-            jd["quality"] = quality_pairs[jd["SeriesNumber"]]
+        jd["localizer_block"] = f"{session_number}-{bisect(localizer_series, jd['SeriesNumber'])}"
+        if quality_pairs:
+            if jd["SeriesNumber"] in quality_pairs:
+                jd["quality"] = quality_pairs[jd["SeriesNumber"]]
+            else:
+                logger.warning(f"Cannot find the Series Number - {jd['SeriesNumber']} - in the usability file. Marking the file - {sidecar} - as 'usable'")
+                jd["quality"] = "usable"
         else:
-            logger.warning(f"Cannot find the Series Number - {jd['SeriesNumber']} - in the session xml. Marking the file - {sidecar} - as 'unusable'")
-            jd["quality"] = "unusable"
+            jd["quality"] = "usable"
         with sidecar.open("w") as f:
             json.dump(jd, f, indent=4)
 
@@ -321,12 +303,13 @@ def dicom_to_bids(subject:str,
                   session:str,
                   source_dir:Path,
                   bids_dir:Path,
-                  xml_path:Path,
+                  usability_file:Path,
                   bids_config:Path,
                   nordic_config:Path = None,
                   nifti:bool = False,
                   skip_validate:bool = False,
-                  skip_prompt:bool = False):
+                  skip_prompt:bool = False,
+                  session_index:int = 0):
     """
     Facilitates the conversion of DICOM data into NIFTI data in BIDS format, and the removal of data marked 'unusable'.
 
@@ -336,7 +319,7 @@ def dicom_to_bids(subject:str,
     :type session: str
     :param source_dir: Path to 'sourcedata' directory (or wherever DICOM data is kept).
     :type source_dir: pathlib.Path
-    :param bids_dir: Path to the bids directory to store the newly made NIFTI files
+    :param bids_dir: Path to the bids directory to store the newly made NIFTI  files
     :type bids_dir: pathlib.Path
     :param bids_config: Path to dcm2bids config file, which maps raw sourcedata to BIDS-compliant counterpart
     :type bids_config: pathlib.Path
@@ -381,12 +364,9 @@ def dicom_to_bids(subject:str,
     else:
         nifti_path = source_dir
 
-    # if flags.longitudinal:
-    #     match_xml_to_nifti(nifti_dir=nifti_path,
-    #                        xml_path=xml_path)
-
-    match_xml_to_nifti(nifti_dir=nifti_path,
-                       xml_path=xml_path)
+    add_information_to_sidecar(nifti_dir=nifti_path, 
+                             usability_file=usability_file,
+                             session_number=session_index)
 
     run_dcm2bids(subject=subject,
                  session=session,
