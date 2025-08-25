@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 #             localizers.add((acq_time, series_id))
 #     return (sorted(localizers), study_id)
 
+DEFAULT_LOCALIZER_LABEL = "00"
 
 def get_empty_group():
     return {"task":set(), "fmapAP": set(), "fmapPA": set()}
@@ -61,7 +62,7 @@ def get_func_from_bids(bids_layout: BIDSLayout,
 
     for bold_file in func_files:
         acq_time = datetime.strptime(bold_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
-        localizer_block_label = bold_file.entities["localizer_block"]
+        localizer_block_label = bold_file.entities["localizer_block"] if "localizer_block" in bold_file.entities else DEFAULT_LOCALIZER_LABEL
         if localizer_block_label not in groupings:
             groupings[localizer_block_label] = get_empty_group()
         groupings[localizer_block_label]["task"].add((bold_file, acq_time))
@@ -79,7 +80,7 @@ def get_fmap_from_bids(bids_layout: BIDSLayout,
     for epi_file in fmap_files:
         acq_time = datetime.strptime(epi_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
         direction = f"fmap{epi_file.entities['direction']}"
-        localizer_block_label = epi_file.entities["localizer_block"]
+        localizer_block_label = epi_file.entities["localizer_block"] if "localizer_block" in epi_file.entities else DEFAULT_LOCALIZER_LABEL
         if localizer_block_label not in groupings:
             groupings[localizer_block_label] = get_empty_group()
         groupings[localizer_block_label][direction].add((epi_file, acq_time))

@@ -247,8 +247,8 @@ def add_information_to_sidecar(nifti_dir:Path,
             if jd["SeriesNumber"] in quality_pairs:
                 jd["quality"] = quality_pairs[jd["SeriesNumber"]]
             else:
-                logger.warning(f"Cannot find the Series Number - {jd['SeriesNumber']} - in the usability file. Marking the file - {sidecar} - as 'unusable'")
-                jd["quality"] = "unusable"
+                logger.warning(f"Cannot find the Series Number - {jd['SeriesNumber']} - in the usability file. Marking the file - {sidecar} - as 'usable'")
+                jd["quality"] = "usable"
         else:
             jd["quality"] = "usable"
         with sidecar.open("w") as f:
