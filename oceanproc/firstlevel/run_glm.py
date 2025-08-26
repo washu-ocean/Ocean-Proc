@@ -8,11 +8,23 @@ import numpy.typing as npt
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import nibabel as nib
+from copy import deepcopy
 # from nilearn.glm.first_level import FirstLevelModel
 # from nilearn.plotting import plot_design_matrix
 # import matplotlib.pyplot as plt
 import nilearn.masking as nmask
-from nilearn.signal import butterworth, _handle_scrubbed_volumes, clean
+from scipy import linalg
+from functools import partial
+from nilearn.signal import (
+    butterworth,
+    _handle_scrubbed_volumes,
+    clean,
+    standardize_signal,
+    _check_filter_parameters,
+    _check_signal_parameters,
+    _sanitize_inputs,
+    _censor_signals
+)
 from scipy import signal
 from scipy.stats import gamma
 from ..oceanparse import OceanParser
@@ -38,6 +50,167 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger()
 
 VERSION = "1.1.3"
+
+# Reimplementation of nilearn's 'clean' function that saves out
+
+
+def clean_and_save_intermediates(
+    signals,
+    runs=None,
+    detrend=True,
+    standardize="zscore",
+    sample_mask=None,
+    confounds=None,
+    standardize_confounds=True,
+    filter="butterworth",
+    low_pass=None,
+    high_pass=None,
+    t_r=2.5,
+    ensure_finite=False,
+    extrapolate=True,
+    imagetype=None,
+    brain_mask=None,
+    header=None,
+    img_path=None,
+    debug=False,
+    **kwargs
+):
+    _create_image = partial(create_image, imagetype=imagetype, brain_mask=brain_mask, tr=t_r, header=header)
+    step_counter = 1
+    if imagetype == "cifti":
+        suffix = ".dtseries.nii"
+    else:
+        suffix = ".nii.gz"
+    img_path = Path(str(img_path) + suffix)
+
+    def _append_step(img_path, step):
+        return Path(str(img_path).replace(suffix, step + suffix))
+
+    def _create_and_save_image(signals, filename):
+        if debug:
+            img, _ = _create_image(signals)
+            logger.info(f"Saving out {filename!s} (part of clean function)...")
+            nib.save(img, filename)
+    confounds = confounds.__fspath__() if isinstance(confounds, os.PathLike) else confounds
+    if confounds is not None:
+        _check_signal_parameters(detrend, standardize_confounds)
+    # check if filter parameters are satisfied and return correct filter
+    filter_type = _check_filter_parameters(filter, low_pass, high_pass, t_r)
+    # Read confounds and signals
+    signals, runs, confounds, sample_mask = _sanitize_inputs(
+        signals, runs, confounds, sample_mask, ensure_finite
+    )
+    img_path = _append_step(img_path, f"_sanitized{step_counter}")
+    step_counter += 1
+    _create_and_save_image(signals, img_path)
+    signals, confounds, sample_mask = _handle_scrubbed_volumes(
+        signals, confounds, sample_mask, filter_type, t_r, extrapolate
+    )
+    img_path = _append_step(img_path, f"_interp{step_counter}")
+    step_counter += 1
+    _create_and_save_image(signals, img_path)
+    original_mean_signals = signals.mean(axis=0)
+    if detrend:
+        signals = standardize_signal(
+            signals, standardize=False, detrend=detrend
+        )
+        img_path = _append_step(img_path, f"_detrend{step_counter}")
+        step_counter += 1
+        _create_and_save_image(signals, img_path)
+        if confounds is not None:
+            confounds = standardize_signal(
+                confounds, standardize=False, detrend=detrend
+            )
+
+    # Remove confounds
+    if confounds is not None:
+        confounds = standardize_signal(
+            confounds, standardize=standardize_confounds, detrend=False
+        )
+        if not standardize_confounds:
+            # Improve numerical stability by controlling the range of
+            # confounds. We don't rely on standardize_signal as it removes any
+            # constant contribution to confounds.
+            confound_max = np.max(np.abs(confounds), axis=0)
+            confound_max[confound_max == 0] = 1
+            confounds /= confound_max
+
+        # Pivoting in qr decomposition was added in scipy 0.10
+        Q, R, _ = linalg.qr(confounds, mode="economic", pivoting=True)
+        Q = Q[:, np.abs(np.diag(R)) > np.finfo(np.float64).eps * 100.0]
+        signals -= Q.dot(Q.T).dot(signals)
+        img_path = _append_step(img_path, f"_orthotoconfs{step_counter}")
+        step_counter += 1
+        _create_and_save_image(signals, img_path)
+
+    # Standardize
+    if not standardize:
+        return signals
+
+    # detect if mean is close to zero; This can obscure the scale of the signal
+    # with percent signal change standardization. This should happen when the
+    # data was 1. detrended 2. high pass filtered.
+    filtered_mean_check = (
+        np.abs(signals.mean(0)).mean() / np.abs(original_mean_signals).mean()
+        < 1e-1
+    )
+    if standardize == "psc" and filtered_mean_check:
+        # If the signal is detrended, the mean signal will be zero or close to
+        # zero. If signal is high pass filtered with butterworth, the constant
+        # (mean) will be removed. This is detected through checking the scale
+        # difference of the original mean and filtered mean signal. When the
+        # mean is too small, we have to know the original mean signal to
+        # calculate the psc to avoid weird scaling.
+        signals = standardize_signal(
+            signals + original_mean_signals,
+            standardize=standardize,
+            detrend=False,
+        )
+        img_path = _append_step(img_path, f"_psc{step_counter}")
+        step_counter += 1
+        _create_and_save_image(signals, img_path)
+    else:
+        signals = standardize_signal(
+            signals,
+            standardize=standardize,
+            detrend=False,
+        )
+        if isinstance(standardize, bool) and standardize is True:
+            img_path = _append_step(img_path, f"_zscore{step_counter}")
+        elif isinstance(standardize, bool) and standardize is False:
+            img_path = _append_step(img_path, f"_nostd{step_counter}")
+        else:
+            img_path = _append_step(img_path, f"_{standardize}{step_counter}")
+        step_counter += 1
+        _create_and_save_image(signals, img_path)
+    # Butterworth filtering
+    if filter_type == "butterworth":
+        butterworth_kwargs = {
+            k.replace("butterworth__", ""): v
+            for k, v in kwargs.items()
+            if k.startswith("butterworth__")
+        }
+        signals = butterworth(
+            signals,
+            sampling_rate=1.0 / t_r,
+            low_pass=low_pass,
+            high_pass=high_pass,
+            **butterworth_kwargs,
+        )
+        img_path = _append_step(img_path, f"_filt{step_counter}")
+        step_counter += 1
+        _create_and_save_image(signals, img_path)
+        if confounds is not None:
+            # Apply low- and high-pass filters to keep filters orthogonal
+            # (according to Lindquist et al. (2018))
+            confounds = butterworth(
+                confounds,
+                sampling_rate=1.0 / t_r,
+                low_pass=low_pass,
+                high_pass=high_pass,
+                **butterworth_kwargs,
+            )
+    return signals
 
 
 @debug_logging
@@ -417,7 +590,15 @@ def filter_data(func_data: npt.ArrayLike,
         A numpy array representing BOLD data with the filter applied
     """
     if not mask.shape[0] == func_data.shape[0]:
-        raise ValueError("Mask must be the same length as the functional data")
+        raise ValueError(
+            dedent(
+                f"""
+                Mask must be the same length as the functional data
+                {mask.shape[0]=}
+                {func_data.shape[0]=}
+                 """
+            )
+        )
     if not any((
         padtype == "none",
         padlen is None,
@@ -531,19 +712,27 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     mask: npt.ArrayLike
         Numpy array representing a mask to apply to the two other parameters
     """
-    
-    assert mask.shape[0] == func_data.shape[0], "the mask must be the same length as the functional data"
-    assert mask.dtype == bool
+
+    if mask.shape[0] != func_data.shape[0]:
+        raise ValueError(
+            dedent(
+                f"""
+                Mask must be the same length as the functional data
+                {mask.shape[0]=}
+                {func_data.shape[0]=}
+                 """
+            )
+        )
     # apply the mask to the data
     design_matrix = design_matrix.to_numpy()
     masked_func_data = func_data.copy()[mask, :]
     masked_design_matrix = design_matrix.copy()[mask, :]
 
-    func_ss = StandardScaler()
+    # func_ss = StandardScaler()
     design_ss = StandardScaler()
 
     # standardize the masked data
-    masked_func_data = func_ss.fit_transform(masked_func_data)
+    # masked_func_data = func_ss.fit_transform(masked_func_data)
     masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
     # comput beta values
@@ -551,7 +740,7 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     beta_data = np.dot(inv_mat, masked_func_data)
 
     # standardize the unmasked data
-    func_data = func_ss.transform(func_data)
+    # func_data = func_ss.transform(func_data)
     design_matrix = design_ss.transform(design_matrix)
 
     # compute the residuals with unmasked data
@@ -1082,8 +1271,9 @@ def main():
                 "sample_mask": run_mask,
                 "low_pass": args.lowpass if args.lowpass else None,
                 "high_pass": args.highpass if args.highpass else None,
-                "extrapolate": False,
-                "standardize": False if args.standardize == "none" else args.standardize
+                "extrapolate": True,
+                "standardize": False if args.standardize == "none" else args.standardize,
+                "butterworth_padtype": "constant"
             }
             if args.filter_padtype:
                 if args.filter_padtype == "zero":
@@ -1095,63 +1285,47 @@ def main():
                     clean_args["butterworth_padtype"] = args.filter_padtype
             if args.filter_padlen:
                 clean_args["butterworth_padlen"] = args.filter_padlen
-            if args.debug:
-                cleanimg, img_suffix = create_image(
-                    data=demean_detrend(func_data),
-                    imagetype=imagetype,
-                    brain_mask=brain_mask,
-                    tr=tr,
-                    header=img_header
-                )
-                dd_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_dd{img_suffix}"
-                logger.debug(f" saving BOLD data after demeaning/detrending to file: {dd_filename}")
-                nib.save(
-                    cleanimg,
-                    dd_filename
-                )
-            interp_func_data, _, _ = _handle_scrubbed_volumes(
-                signals=demean_detrend(func_data),
-                confounds=None,
-                sample_mask=run_mask,
-                filter_type="butterworth",
-                t_r=tr,
-                extrapolate=True
-            )
-            func_data = clean(
+            logger.info(f"before cleaning: {func_data.shape=}")
+            logger.info(f"{run_mask.shape=}")
+            func_data = clean_and_save_intermediates(
                 func_data,
+                imagetype=imagetype,
+                brain_mask=brain_mask,
+                header=img_header,
+                img_path=(args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}"),
+                debug=args.debug,
                 **clean_args
             )
-            assert interp_func_data[run_mask,:].shape == func_data.shape
-            interp_func_data[run_mask,:] = func_data
-            func_data = interp_func_data
-            if args.debug:
-                cleanimg, img_suffix = create_image(
-                    data=func_data,
-                    imagetype=imagetype,
-                    brain_mask=brain_mask,
-                    tr=tr,
-                    header=img_header
-                )
-                filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered{img_suffix}"
-                logger.debug(f" saving BOLD data after filtering to file: {filtered_filename}")
-                nib.save(
-                    cleanimg,
-                    filtered_filename
-                )
-                # interp_func_data[run_mask] = func_data[run_mask]
-                # cleaninterpimg, img_suffix = create_image(
-                #     data=interp_func_data,
-                #     imagetype=imagetype,
-                #     brain_mask=brain_mask,
-                #     tr=tr,
-                #     header=img_header
-                # )
-                # interp_filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered_interp{img_suffix}"
-                # logger.debug(f" saving BOLD data after filtering (including interpolated frames) to file: {interp_filtered_filename}")
-                # nib.save(
-                #     cleaninterpimg,
-                #     interp_filtered_filename
-                # )
+            logger.info(f"{run_mask.shape=}")
+            logger.info(f"after cleaning: {func_data.shape=}")
+            # if args.debug:
+            #     cleanimg, img_suffix = create_image(
+            #         data=func_data,
+            #         imagetype=imagetype,
+            #         brain_mask=brain_mask,
+            #         tr=tr,
+            #         header=img_header
+            #     )
+            #     filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered{img_suffix}"
+            #     logger.debug(f" saving BOLD data after filtering to file: {filtered_filename}")
+            #     nib.save(
+            #         cleanimg,
+            #         filtered_filename
+            #     )
+            # interp_func_data[run_mask] = func_data[run_mask]
+            # cleaninterpimg, img_suffix = create_image(
+            #     data=interp_func_data,
+            #     imagetype=imagetype,
+            #     brain_mask=brain_mask,
+            #     tr=tr,
+            #     header=img_header
+            # )
+            # interp_filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered_interp{img_suffix}"
+            # logger.debug(f" saving BOLD data after filtering (including interpolated frames) to file: {interp_filtered_filename}")
+            # nib.save(
+            #     cleaninterpimg,
+            #     interp_filtered_filename
+            # )
             # apppend the run-wise data to the session list
             if noise_df is not None:
                 # assert func_data.shape[0] == len(noise_df), "The functional data and the nuisance matrix have a different number of timepoints"
