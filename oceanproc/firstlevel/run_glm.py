@@ -100,6 +100,19 @@ def demean_detrend(func_data: npt.ArrayLike) -> np.ndarray:
     return data_dd
 
 
+def percent_signal_change(data: npt.ArrayLike, mask: npt.ArrayLike):
+    masked_data = data[mask, :]
+    mean = np.nanmean(masked_data, axis=0)
+    mean = np.repeat(mean[np.newaxis,:], data.shape[0], axis=0)
+    psc_data = ((data - mean) / np.abs(mean)) * 100
+    non_valid_indices = np.where(~np.isfinite(psc_data))
+    if len(non_valid_indices[0]) > 0:
+        logger.warning("Found vertices with zero signal, setting these to zero")
+    psc_data[np.where(~np.isfinite(psc_data))] = 0
+    
+    return psc_data
+
+
 def create_hrf(time, time_to_peak=5, undershoot_dur=12):
     """
     This function creates a hemodynamic response function timeseries.
@@ -544,20 +557,20 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     masked_func_data = func_data.copy()[mask, :]
     masked_design_matrix = design_matrix.copy()[mask, :]
 
-    func_ss = StandardScaler()
-    design_ss = StandardScaler()
+    # func_ss = StandardScaler()
+    # design_ss = StandardScaler()
 
-    # standardize the masked data
-    masked_func_data = func_ss.fit_transform(masked_func_data)
-    masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
+    # # standardize the masked data
+    # masked_func_data = func_ss.fit_transform(masked_func_data)
+    # masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
     # comput beta values
     inv_mat = np.linalg.pinv(masked_design_matrix)
     beta_data = np.dot(inv_mat, masked_func_data)
 
     # standardize the unmasked data
-    func_data = func_ss.transform(func_data)
-    design_matrix = design_ss.transform(design_matrix)
+    # func_data = func_ss.transform(func_data)
+    # design_matrix = design_ss.transform(design_matrix)
 
     # compute the residuals with unmasked data
     est_values = np.dot(design_matrix, beta_data)
@@ -664,6 +677,8 @@ def main():
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
                                   help="""Flag to demean and detrend the data before modeling. The default is to include
                         a mean and trend line into the nuisance matrix instead.""")
+    config_arguments.add_argument("--percent_change", "-pc", action="store_true",
+                                  help="""Flag convert data to percent signal change.""")
     config_arguments.add_argument("--no_global_mean", action="store_true",
                                   help="Flag to indicate that you do not want to include a global mean into the model.")
     high_motion_params = config_arguments.add_mutually_exclusive_group()
@@ -881,6 +896,7 @@ def main():
             tr = tr if tr else read_tr
             img_header = img_header if img_header else read_header
 
+            step_count = 0
             # create the events matrix
             logger.info(" reading events file and creating design matrix")
             events_long = None
@@ -973,6 +989,28 @@ def main():
                 events_df.to_csv(events_df_filename)
                 unmodified_output_dir_contents.discard(events_df_filename)
 
+
+            if args.percent_change:
+                func_data_psc = percent_signal_change(func_data, run_mask)
+                run_map["data_psc"] = func_data_psc
+                func_data = func_data_psc
+                step_count += 1
+                if flags.debug:
+                    pscimg, img_suffix = create_image(
+                        data=func_data,
+                        imagetype=imagetype,
+                        brain_mask=brain_mask,
+                        tr=tr,
+                        header=img_header
+                    )
+                    cleaned_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_step-{step_count}_psc{img_suffix}"
+                    logger.debug(f" saving BOLD data after detrending to file: {cleaned_filename}")
+                    nib.save(
+                        pscimg,
+                        cleaned_filename
+                    )
+                    unmodified_output_dir_contents.discard(cleaned_filename)
+
             # detrend the BOLD data if specifed
             if args.detrend_data:
                 logger.info(" detrending the BOLD data")
@@ -1049,7 +1087,7 @@ def main():
 
                 run_map["data_resids"] = func_data_residuals
                 func_data = func_data_residuals
-
+                step_count += 1
                 if flags.debug:
                     # save out the BOLD data after nuisance regression
                     nrimg, img_suffix = create_image(
@@ -1059,7 +1097,7 @@ def main():
                         tr=tr,
                         header=img_header
                     )
-                    nr_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_nuisance-regressed{img_suffix}"
+                    nr_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_step-{step_count}_nuisance-regressed{img_suffix}"
                     logger.debug(f" saving BOLD data after nuisance regression to file: {nr_filename}")
                     nib.save(
                         nrimg,
@@ -1098,6 +1136,7 @@ def main():
                 )
                 run_map["data_filtered"] = func_data_filtered
                 func_data = func_data_filtered
+                step_count += 1
                 if flags.debug:
                     cleanimg, img_suffix = create_image(
                         data=func_data,
@@ -1106,7 +1145,7 @@ def main():
                         tr=tr,
                         header=img_header
                     )
-                    filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered{img_suffix}"
+                    filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_step-{step_count}_filtered{img_suffix}"
                     logger.debug(f" saving BOLD data after filtering to file: {filtered_filename}")
                     nib.save(
                         cleanimg,
@@ -1168,7 +1207,7 @@ def main():
             design_matrix=final_design_unmasked,
             mask=final_high_motion_mask
         )
-
+        step_count += 1
         # save out the beta values
         logger.info("saving betas from GLM into files")
         fir_betas_to_combine = set()
@@ -1283,7 +1322,7 @@ def main():
                 tr=tr,
                 header=img_header
             )
-            resid_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}{user_desc}_residual{img_suffix}"
+            resid_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}{user_desc}_step-{step_count}_residual{img_suffix}"
             logger.debug(f" saving residual BOLD data after final GLM to file: {resid_filename}")
             nib.save(
                 resid_img,
