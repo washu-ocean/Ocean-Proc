@@ -1,0 +1,3 @@
+[submodule "Dcm2Bids"]
+	path = Dcm2Bids
+	url = git@github.com:joey-scanga/Dcm2Bids.git
