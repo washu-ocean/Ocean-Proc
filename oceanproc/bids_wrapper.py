@@ -185,7 +185,7 @@ def run_dcm2niix(source_dir:Path,
                            exit_func=clean_up_func if clean_up_func else None)
 
     # Delete or move extra files from short runs
-    files_to_remove = list(tmp_nifti_dir.glob("*a.nii.gz")) + list(tmp_nifti_dir.glob("*a.json"))
+    files_to_remove = list(tmp_nifti_dir.glob("*a.nii.gz")) + list(tmp_nifti_dir.glob("*a.json")) + list(tmp_nifti_dir.glob(f"10[0-9][0-9]_{source_dir.name}*"))
     if flags.debug:
         unused_files_dir = tmp_nifti_dir.parent / f"{tmp_nifti_dir.name}_unused"
         unused_files_dir.mkdir(exist_ok=True)

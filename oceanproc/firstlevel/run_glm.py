@@ -906,7 +906,7 @@ def main():
             noise_df = make_noise_ts(
                 confounds_file=run_map["confounds"],
                 confounds_columns=args.confounds,
-                demean=(not args.detrend_data),
+                demean=False, #(not args.detrend_data),
                 linear_trend=(not args.detrend_data),
                 spike_threshold=args.fd_threshold if args.spike_regression else None,
                 volterra_expansion=args.volterra_lag,
