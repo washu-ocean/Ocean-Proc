@@ -1,0 +1,29 @@
+Node: tester.get_file
+Working directory: /data/sylvester/data1/users/agardr/tester/get_file
+
+Node inputs:
+
+function_str = function=lambda in_file: str(in_file),
+
+in_file = /data/sylvester/data1/users/agardr/tester/make_design/sub-4000_ses-030321_task-oddball_run-01_desc-b07_events_events-matrix.csv
+name = get_in_file
+
+Traceback (most recent call last):
+  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/pipeline/plugins/linear.py", line 45, in run
+    node.run(updatehash=updatehash)
+  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/pipeline/engine/nodes.py", line 525, in run
+    result = self._run_interface(execute=True)
+  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/pipeline/engine/nodes.py", line 643, in _run_interface
+    return self._run_command(execute)
+  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/pipeline/engine/nodes.py", line 769, in _run_command
+    raise NodeExecutionError(msg)
+nipype.pipeline.engine.nodes.NodeExecutionError: Exception raised while executing Node get_file.
+
+Traceback:
+	Traceback (most recent call last):
+	  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/interfaces/base/core.py", line 401, in run
+	    runtime = self._run_interface(runtime)
+	  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/interfaces/utility/wrappers.py", line 139, in _run_interface
+	    out = function_handle(**args)
+	TypeError: 'tuple' object is not callable
+

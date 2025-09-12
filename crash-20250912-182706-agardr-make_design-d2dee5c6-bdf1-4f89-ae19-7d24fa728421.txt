@@ -1,0 +1,33 @@
+Node: tester.make_design
+Working directory: /data/sylvester/data1/users/agardr/tester/make_design
+
+Node inputs:
+
+fir = <undefined>
+fir_list = <undefined>
+hrf = [5, 12]
+hrf_list = <undefined>
+in_file = /data/sylvester/data1/users/agardr/sub-4000_ses-030321_task-oddball_run-01_desc-b07_events.tsv
+tr = 1.2
+unmodeled = <undefined>
+volumes = 335
+
+Traceback (most recent call last):
+  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/pipeline/plugins/linear.py", line 45, in run
+    node.run(updatehash=updatehash)
+  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/pipeline/engine/nodes.py", line 525, in run
+    result = self._run_interface(execute=True)
+  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/pipeline/engine/nodes.py", line 643, in _run_interface
+    return self._run_command(execute)
+  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/pipeline/engine/nodes.py", line 769, in _run_command
+    raise NodeExecutionError(msg)
+nipype.pipeline.engine.nodes.NodeExecutionError: Exception raised while executing Node make_design.
+
+Traceback:
+	Traceback (most recent call last):
+	  File "/data/sylvester/data1/users/agardr/ocean-proc/.venv/lib/python3.10/site-packages/nipype/interfaces/base/core.py", line 401, in run
+	    runtime = self._run_interface(runtime)
+	  File "/data/sylvester/data1/users/agardr/ocean-proc/oceanproc/firstlevel/operations.py", line 90, in _run_interface
+	    cfeats = self._hrf_convolve_features(events_matrix,
+	TypeError: DesignMat._hrf_convolve_features() got multiple values for argument 'column_names'
+

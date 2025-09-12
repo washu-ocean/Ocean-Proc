@@ -196,19 +196,26 @@ def parse_args():
     #     exit_program_early(e)
 
     # Export the current arguments to a file
-    if args.export_args:
-        try:
-            assert args.export_args.is_file(), "Argument export path must be a file path in a directory that exists"
-            log_linebreak()
-            logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
-            export_args_to_file(args, config_arguments, args.export_args)
-        except Exception as e:
-            logger.exception(e)
-            exit_program_early(e)
+    # if args.export_args:
+    #     try:
+    #         assert args.export_args.is_file(), "Argument export path must be a file path in a directory that exists"
+    #         log_linebreak()
+    #         logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
+    #         export_args_to_file(args, config_arguments, args.export_args)
+    #     except Exception as e:
+    #         logger.exception(e)
+    #         exit_program_early(e)
 
-    user_desc = f"-{args.custom_desc}" if args.custom_desc else ""
-    file_name_base = f"sub-{args.subject}_ses-{args.session}_task-{args.task}"
+    args.custom_desc = f"-{args.custom_desc}" if args.custom_desc else ""
+    args.file_name_base = f"sub-{args.subject}_ses-{args.session}_task-{args.task}"
 
+    if not hasattr(args, "output_dir") or args.output_dir is None:
+        args.output_dir = args.derivs_dir / f"{args.derivs_subfolder}/sub-{args.subject}/ses-{args.session}/func"
+  
     '''
     TODO: create singleton options class so arguments are passed to each process
     '''
+    import config
+    config.set_configs(args)
+    
+            
