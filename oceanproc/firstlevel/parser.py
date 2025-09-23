@@ -40,6 +40,23 @@ def _build_parser():
                 f"the parent directory for path string <{path}> does not exist"
             )
         return p
+    
+    def PositiveValue(val):
+        valid = True
+        if isinstance(val, list):
+            for v in val:
+                if v <= 0:
+                    valid = False 
+                    break
+        else:
+            if v <= 0:
+                valid = False
+        if not valid:
+            raise argparse.ArgumentTypeError(
+                f"The value(s) supplied must be greater than zero: {val}"
+            )
+        return val
+
 
     parser = OceanParser(
         prog="oceanfla",
@@ -74,7 +91,7 @@ def _build_parser():
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
     config_arguments.add_argument("--func_space",
                                   help="Space that the preprocessed data should be in (for example, 'T2w', 'MNIInfant', etc.)")
-    config_arguments.add_argument("--fwhm", type=float,
+    config_arguments.add_argument("--fwhm", type=PositiveValue,
                                   help="FWHM smoothing kernel, in mm (only applies to CIFTI data)")
     config_arguments.add_argument("--derivs_dir", "-d", type=ExistingDir, required=True,
                                   help="Path to the BIDS formatted derivatives directory containing processed outputs.")
@@ -88,12 +105,12 @@ def _build_parser():
                                   help="Alternate Path to a directory to store the results of this analysis. Default is '[derivs_dir]/first_level/'")
     config_arguments.add_argument("--custom_desc", "-cd",
                                   help="A custom description to add in the file name of every output file.")
-    config_arguments.add_argument("--fir", "-ff", type=int,
+    config_arguments.add_argument("--fir", "-ff", type=PositiveValue,
                                   help="The number of frames to use in an FIR model.")
     config_arguments.add_argument("--fir_vars", nargs="*",
                                   help="""A list of the task regressors to apply this FIR model to. The default is to apply it to all regressors if no
                         value is specified. A list must be specified if both types of models are being used""")
-    config_arguments.add_argument("--hrf", nargs=2, type=int, metavar=("PEAK", "UNDER"),
+    config_arguments.add_argument("--hrf", nargs=2, type=PositiveValue, metavar=("PEAK", "UNDER"),
                                   help="""Two values to describe the hrf function that will be convolved with the task events.
                         The first value is the time to the peak, and the second is the undershoot duration. Both in units of seconds.""")
     config_arguments.add_argument("--hrf_vars", nargs="*",
@@ -104,17 +121,17 @@ def _build_parser():
     config_arguments.add_argument("--unmodeled", "-um", nargs="*",
                                   help="""A list of the task regressors to leave unmodeled, but still included in the final design matrix. These are
                         typically continuous variables that need not be modeled with hrf or fir, but any of the task regressors can be included.""")
-    config_arguments.add_argument("--start_censoring", "-sc", type=int, default=0,
+    config_arguments.add_argument("--start_censoring", "-sc", type=PositiveValue, default=0,
                                   help="The number of frames to censor out at the beginning of each run. Typically used to censor scanner equilibrium time. Default is 0")
     config_arguments.add_argument("--confounds", "-c", nargs="+", default=[],
                                   help="A list of confounds to include from each confound timeseries tsv file.")
-    config_arguments.add_argument("--fd_threshold", "-fd", type=float, default=0.9,
+    config_arguments.add_argument("--fd_threshold", "-fd", type=PositiveValue, default=0.9,
                                   help="The framewise displacement threshold used when censoring high-motion frames")
-    config_arguments.add_argument("--minimum_unmasked_neighbors", type=int, default=None,
+    config_arguments.add_argument("--minimum_unmasked_neighbors", type=PositiveValue, default=None,
                                   help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
     config_arguments.add_argument("--tmask", action=argparse.BooleanOptionalAction,
                                   help="Flag to indicate that tmask files, if found with the preprocessed outputs, should be used. Tmask files will override framewise displacement threshold censoring if applicable.")
-    config_arguments.add_argument("--repetition_time", "-tr", type=float,
+    config_arguments.add_argument("--repetition_time", "-tr", type=PositiveValue,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
                                   help="""Flag to demean and detrend the data before modeling. The default is to include
@@ -126,25 +143,25 @@ def _build_parser():
                                     help="Flag to indicate that framewise displacement spike regression should be included in the nuisance matrix.")
     high_motion_params.add_argument("--fd_censoring", "-fc", action="store_true",
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
-    config_arguments.add_argument("--run_exclusion_threshold", "-re", type=int,
+    config_arguments.add_argument("--run_exclusion_threshold", "-re", type=PositiveValue,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
                                   help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
                                   all nuisance/confound variables will be included""")
-    config_arguments.add_argument("--nuisance_fd", "-nf", type=float,
+    config_arguments.add_argument("--nuisance_fd", "-nf", type=PositiveValue,
                                   help="The framewise displacement threshold used when censoring frames for nuisance regression.")
-    config_arguments.add_argument("--highpass", "-hp", type=float, nargs="?", const=0.008,
+    config_arguments.add_argument("--highpass", "-hp", type=PositiveValue, nargs="?", const=0.008,
                                   help="""The high pass cutoff frequency for signal filtering. Frequencies below this value (Hz) will be filtered out. If the argument
                         is supplied but no value is given, then the value will default to 0.008 Hz""")
-    config_arguments.add_argument("--lowpass", "-lp", type=float, nargs="?", const=0.1,
+    config_arguments.add_argument("--lowpass", "-lp", type=PositiveValue, nargs="?", const=0.1,
                                   help="""The low pass cutoff frequency for signal filtering. Frequencies above this value (Hz) will be filtered out. If the argument
                         is supplied but no value is given, then the value will default to 0.1 Hz""")
     config_arguments.add_argument("--filter_padtype", default="zero",
                                   choices=["odd", "even", "zero", "constant", "none"],
                                   help="Type of padding to use for low-, high-, or band-pass filter, if one is applied.")
-    config_arguments.add_argument("--filter_padlen", type=int, default=50,
+    config_arguments.add_argument("--filter_padlen", type=PositiveValue, default=50,
                                   help="Length of padding to add to the beginning and end of BOLD run before applying butterworth filter.")
-    config_arguments.add_argument("--volterra_lag", "-vl", nargs="?", const=2, type=int,
+    config_arguments.add_argument("--volterra_lag", "-vl", nargs="?", const=2, type=PositiveValue,
                                   help="""The amount of frames to lag for a volterra expansion. If no value is specified
                         the default of 2 will be used. Must be specifed with the '--volterra_columns' option.""")
     config_arguments.add_argument("--volterra_columns", "-vc", nargs="+", default=[],
