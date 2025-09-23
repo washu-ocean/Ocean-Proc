@@ -109,9 +109,13 @@ def percent_signal_change(data: npt.ArrayLike, mask: npt.ArrayLike):
     if len(non_valid_indices[0]) > 0:
         logger.warning("Found vertices with zero signal, setting these to zero")
     psc_data[np.where(~np.isfinite(psc_data))] = 0
-    
+
     return psc_data
 
+
+def avg_tsnr(fdata, axis=0):
+    tsnr = np.nanmean(fdata, axis=axis) / np.nanstd(fdata, axis=axis)
+    return np.nanmean(tsnr)
 
 def create_hrf(time, time_to_peak=5, undershoot_dur=12):
     """
@@ -560,7 +564,7 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     # func_ss = StandardScaler()
     # design_ss = StandardScaler()
 
-    # # standardize the masked data
+    # standardize the masked data
     # masked_func_data = func_ss.fit_transform(masked_func_data)
     # masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
@@ -576,6 +580,7 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     est_values = np.dot(design_matrix, beta_data)
     resids = func_data - est_values
 
+    # return (beta_data, resids, func_ss.var_, func_ss.mean_)
     return (beta_data, resids)
 
 
@@ -688,6 +693,10 @@ def main():
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=int,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
+    config_arguments.add_argument("--min_average_tsnr", type=float,
+                                  help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in analysis.")
+    config_arguments.add_argument("--min_run_threshold", type=int,
+                                  help="The minimum number of unexcluded runs required to run the GLM")
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
                                   help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
                                   all nuisance/confound variables will be included""")
@@ -971,6 +980,11 @@ def main():
                 if args.run_exclusion_threshold and (frame_retention_percent < args.run_exclusion_threshold):
                     logger.info(f" BOLD run: {run_map['bold']} has fell below the run exclusion threshold of {args.run_exclusion_threshold}% and will not be used in the final GLM.")
                     continue
+                run_tsnr = avg_tsnr(func_data[run_mask, :])
+                if args.min_average_tsnr and run_tsnr < args.min_average_tsnr:
+                    logger.info(f" BOLD run: {run_map['bold']} has average TSNR {run_tsnr} below the average TSNR exclusion threshold of {args.min_average_tsnr} and will not be used in the final GLM.")
+                    continue
+
 
             # save out the nuisance matrix and events matrix (if debug)
             noise_df_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_nuisance.csv"
@@ -988,7 +1002,6 @@ def main():
                 logger.debug(f" saving events matrix to file: {events_df_filename}")
                 events_df.to_csv(events_df_filename)
                 unmodified_output_dir_contents.discard(events_df_filename)
-
 
             if args.percent_change:
                 func_data_psc = percent_signal_change(func_data, run_mask)
@@ -1036,15 +1049,15 @@ def main():
                     unmodified_output_dir_contents.discard(cleaned_filename)
 
             # demean and detrend if filtering is requested
-            if (args.highpass is not None or args.lowpass is not None):
-                if "mean" not in args.nuisance_regression:
-                    logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
-                    args.nuisance_regression.append("mean")
-                if "trend" not in args.nuisance_regression:
-                    logger.warning("High-, low-, or band-pass specified, but trend not specified as nuisance regressor -- adding this in automatically")
-                    args.nuisance_regression.append("trend")
+            # if (args.highpass is not None or args.lowpass is not None):
+            #     if "mean" not in args.nuisance_regression:
+            #         logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
+            #         args.nuisance_regression.append("mean")
+            #     if "trend" not in args.nuisance_regression:
+            #         logger.warning("High-, low-, or band-pass specified, but trend not specified as nuisance regressor -- adding this in automatically")
+            #         args.nuisance_regression.append("trend")
 
-            # nuisance regression if specified        
+            # nuisance regression if specified
             if len(args.nuisance_regression) > 0:
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
                 if args.nuisance_fd:
@@ -1176,6 +1189,9 @@ def main():
         if len(func_data_list) == 0:
             logger.info(f"all run have been excluded with the run exclusion threshold of {args.run_exclusion_threshold}%, try lowering this parameter before running again!")
             return
+        elif len(func_data_list) < args.min_run_threshold:
+            logger.info(f"At least {args.min_run_threshold} runs must be present to run the GLM")
+            return
 
         # create the final design matrix and append the data together
         logger.info("concatenating run level BOLD data and design matrices for GLM")
@@ -1207,6 +1223,33 @@ def main():
             design_matrix=final_design_unmasked,
             mask=final_high_motion_mask
         )
+        # if flags.debug:
+        #     variance_img, img_suffix = create_image(
+        #         data=variance_arr[np.newaxis, :],
+        #         imagetype=imagetype,
+        #         brain_mask=brain_mask,
+        #         tr=tr,
+        #         header=img_header
+        #     )
+        #     variance_img_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-stdscale-variance{img_suffix}"
+        #     logger.info(f" saving session-level variance (of unmasked frames) to file: {variance_img_filename}")
+        #     nib.save(
+        #         variance_img,
+        #         variance_img_filename
+        #     )
+        #     mean_img, img_suffix = create_image(
+        #         data=mean_arr[np.newaxis, :],
+        #         imagetype=imagetype,
+        #         brain_mask=brain_mask,
+        #         tr=tr,
+        #         header=img_header
+        #     )
+        #     mean_img_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-stdscale-mean{img_suffix}"
+        #     logger.info(f" saving session-level mean (of unmasked frames) to file: {mean_img_filename}")
+        #     nib.save(
+        #         mean_img,
+        #         mean_img_filename
+        #     )
         step_count += 1
         # save out the beta values
         logger.info("saving betas from GLM into files")
