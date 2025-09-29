@@ -540,7 +540,7 @@ def create_final_design(data_list: list[npt.ArrayLike],
 def massuni_linGLM(func_data: npt.ArrayLike,
                    design_matrix: pd.DataFrame,
                    mask: npt.ArrayLike,
-                   stdscale: str = "both"):
+                   stdscale: bool):
     """
     Compute the mass univariate GLM.
 
@@ -557,7 +557,6 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     assert mask.shape[0] == func_data.shape[0], "the mask must be the same length as the functional data"
     assert mask.dtype == bool
 
-    stdscale = stdscale in ("seslevel", "both")
     # apply the mask to the data
     design_matrix = design_matrix.to_numpy()
     if stdscale:
@@ -1097,7 +1096,8 @@ def main():
                 nuisance_betas, func_data_residuals = massuni_linGLM(
                     func_data=func_data,
                     design_matrix=noise_regression_df,
-                    mask=nuisance_mask
+                    mask=nuisance_mask,
+                    stdscale=args.stdscale_glm in ("both", "runlevel")
                 )
 
                 run_map["data_resids"] = func_data_residuals
@@ -1224,7 +1224,7 @@ def main():
             func_data=final_func_data,
             design_matrix=final_design_unmasked,
             mask=final_high_motion_mask,
-            stdscale=args.stdscale_glm
+            stdscale=args.stdscale_glm in ("seslevel", "both")
         )
         # if flags.debug:
         #     variance_img, img_suffix = create_image(
