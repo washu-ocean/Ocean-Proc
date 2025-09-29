@@ -693,9 +693,9 @@ def main():
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=int,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
-    config_arguments.add_argument("--min_average_tsnr", type=float,
+    config_arguments.add_argument("--min_average_tsnr", type=float, default=0,
                                   help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in analysis.")
-    config_arguments.add_argument("--min_run_threshold", type=int,
+    config_arguments.add_argument("--min_run_threshold", type=int, default=0,
                                   help="The minimum number of unexcluded runs required to run the GLM")
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
                                   help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
