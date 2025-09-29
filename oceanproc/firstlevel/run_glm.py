@@ -573,8 +573,8 @@ def massuni_linGLM(func_data: npt.ArrayLike,
 
     # standardize the unmasked data
     if stdscale:
-        func_data = StandardScaler().transform(func_data)
-        design_matrix = StandardScaler().transform(design_matrix)
+        func_data = StandardScaler().fit_transform(func_data)
+        design_matrix = StandardScaler().fit_transform(design_matrix)
 
     # compute the residuals with unmasked data
     est_values = np.dot(design_matrix, beta_data)
