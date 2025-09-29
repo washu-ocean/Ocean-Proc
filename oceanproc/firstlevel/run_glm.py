@@ -722,7 +722,7 @@ def main():
                                   help="Path to a dlabel file to use for parcellation of a dtseries")
 
     args = parser.parse_args()
-
+    
     if args.hrf is not None and args.fir is not None:
         if not args.fir_vars or not args.hrf_vars:
             parser.error("Must specify variables to apply each model to if using both types of models")
