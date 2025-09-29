@@ -23,6 +23,8 @@ import argparse
 import datetime
 from textwrap import dedent
 
+np.random.default_rng(seed=1234)
+
 """
 TODO:
     * Find good way to pass hrf peak and undershoot variables
