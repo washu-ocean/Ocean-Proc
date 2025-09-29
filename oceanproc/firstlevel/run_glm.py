@@ -20,7 +20,6 @@ import argparse
 import datetime
 from textwrap import dedent
 
-np.random.default_rng(seed=1234)
 
 """
 TODO:
@@ -603,6 +602,7 @@ def autogenerate_mask(mask_files: list[Path], output_path: Path) -> Path:
 
 
 def main():
+
     parser = OceanParser(
         prog="oceanfla",
         description="Ocean Labs first level analysis",
@@ -722,8 +722,12 @@ def main():
                                   help="Path to a dlabel file to use for parcellation of a dtseries")
     config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="both",
                                   help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
+    config_arguments.add_argument("--np_random_seed", type=int, default=42,
+                                  help="Set Numpy seed (default is 42)")
 
     args = parser.parse_args()
+
+    np.random.default_rng(seed=args.np_random_seed)
 
     if args.hrf is not None and args.fir is not None:
         if not args.fir_vars or not args.hrf_vars:
