@@ -117,6 +117,7 @@ def avg_tsnr(fdata, axis=0):
     tsnr = np.nanmean(fdata, axis=axis) / np.nanstd(fdata, axis=axis)
     return np.nanmean(tsnr)
 
+
 def create_hrf(time, time_to_peak=5, undershoot_dur=12):
     """
     This function creates a hemodynamic response function timeseries.
@@ -539,7 +540,8 @@ def create_final_design(data_list: list[npt.ArrayLike],
 @debug_logging
 def massuni_linGLM(func_data: npt.ArrayLike,
                    design_matrix: pd.DataFrame,
-                   mask: npt.ArrayLike):
+                   mask: npt.ArrayLike,
+                   stdscale: bool = False):
     """
     Compute the mass univariate GLM.
 
@@ -558,29 +560,28 @@ def massuni_linGLM(func_data: npt.ArrayLike,
 
     # apply the mask to the data
     design_matrix = design_matrix.to_numpy()
-    masked_func_data = func_data.copy()[mask, :]
-    masked_design_matrix = design_matrix.copy()[mask, :]
-
-    # func_ss = StandardScaler()
-    # design_ss = StandardScaler()
+    if stdscale:
+        masked_func_data = StandardScaler().fit_transform(func_data.copy()[mask, :])
+        masked_design_matrix = StandardScaler().fit_transform(design_matrix.copy()[mask, :])
+    else:
+        masked_func_data = func_data.copy()[mask, :]
+        masked_design_matrix = design_matrix.copy()[mask, :]
 
     # standardize the masked data
-    # masked_func_data = func_ss.fit_transform(masked_func_data)
-    # masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
     # comput beta values
     inv_mat = np.linalg.pinv(masked_design_matrix)
     beta_data = np.dot(inv_mat, masked_func_data)
 
     # standardize the unmasked data
-    # func_data = func_ss.transform(func_data)
-    # design_matrix = design_ss.transform(design_matrix)
+    if stdscale:
+        func_data = StandardScaler().transform(func_data)
+        design_matrix = StandardScaler().transform(design_matrix)
 
     # compute the residuals with unmasked data
     est_values = np.dot(design_matrix, beta_data)
     resids = func_data - est_values
 
-    # return (beta_data, resids, func_ss.var_, func_ss.mean_)
     return (beta_data, resids)
 
 
@@ -720,9 +721,11 @@ def main():
                                   help="The confound columns to include in the expansion. Must be specifed with the '--volterra_lag' option.")
     config_arguments.add_argument("--parcellate", "-parc", type=Path,
                                   help="Path to a dlabel file to use for parcellation of a dtseries")
+    config_arguments.add_argument("--stdscale_glm", action="store_true",
+                                  help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
 
     args = parser.parse_args()
-    
+
     if args.hrf is not None and args.fir is not None:
         if not args.fir_vars or not args.hrf_vars:
             parser.error("Must specify variables to apply each model to if using both types of models")
@@ -985,7 +988,6 @@ def main():
                     logger.info(f" BOLD run: {run_map['bold']} has average TSNR {run_tsnr} below the average TSNR exclusion threshold of {args.min_average_tsnr} and will not be used in the final GLM.")
                     continue
 
-
             # save out the nuisance matrix and events matrix (if debug)
             noise_df_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_nuisance.csv"
             logger.info(f" saving nuisance matrix to file: {noise_df_filename}")
@@ -1221,7 +1223,8 @@ def main():
         activation_betas, func_residual = massuni_linGLM(
             func_data=final_func_data,
             design_matrix=final_design_unmasked,
-            mask=final_high_motion_mask
+            mask=final_high_motion_mask,
+            stdscale=args.stdscale_glm
         )
         # if flags.debug:
         #     variance_img, img_suffix = create_image(
