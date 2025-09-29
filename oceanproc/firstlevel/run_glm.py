@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import numpy as np
 import sys
 import os
 from pathlib import Path
@@ -8,9 +7,7 @@ import numpy.typing as npt
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import nibabel as nib
-# from nilearn.glm.first_level import FirstLevelModel
-# from nilearn.plotting import plot_design_matrix
-# import matplotlib.pyplot as plt
+import numpy as np
 import nilearn.masking as nmask
 from nilearn.signal import butterworth, _handle_scrubbed_volumes
 from scipy import signal
@@ -543,7 +540,7 @@ def create_final_design(data_list: list[npt.ArrayLike],
 def massuni_linGLM(func_data: npt.ArrayLike,
                    design_matrix: pd.DataFrame,
                    mask: npt.ArrayLike,
-                   stdscale: bool = False):
+                   stdscale: str = "both"):
     """
     Compute the mass univariate GLM.
 
@@ -560,6 +557,7 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     assert mask.shape[0] == func_data.shape[0], "the mask must be the same length as the functional data"
     assert mask.dtype == bool
 
+    stdscale = stdscale in ("seslevel", "both")
     # apply the mask to the data
     design_matrix = design_matrix.to_numpy()
     if stdscale:
@@ -723,7 +721,7 @@ def main():
                                   help="The confound columns to include in the expansion. Must be specifed with the '--volterra_lag' option.")
     config_arguments.add_argument("--parcellate", "-parc", type=Path,
                                   help="Path to a dlabel file to use for parcellation of a dtseries")
-    config_arguments.add_argument("--stdscale_glm", action="store_true",
+    config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="both",
                                   help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
 
     args = parser.parse_args()
