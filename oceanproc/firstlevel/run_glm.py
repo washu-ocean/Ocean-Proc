@@ -1053,15 +1053,6 @@ def main():
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
 
-            # demean and detrend if filtering is requested
-            # if (args.highpass is not None or args.lowpass is not None):
-            #     if "mean" not in args.nuisance_regression:
-            #         logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
-            #         args.nuisance_regression.append("mean")
-            #     if "trend" not in args.nuisance_regression:
-            #         logger.warning("High-, low-, or band-pass specified, but trend not specified as nuisance regressor -- adding this in automatically")
-            #         args.nuisance_regression.append("trend")
-
             # nuisance regression if specified
             if len(args.nuisance_regression) > 0:
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
@@ -1230,33 +1221,6 @@ def main():
             mask=final_high_motion_mask,
             stdscale=args.stdscale_glm in ("seslevel", "both")
         )
-        # if flags.debug:
-        #     variance_img, img_suffix = create_image(
-        #         data=variance_arr[np.newaxis, :],
-        #         imagetype=imagetype,
-        #         brain_mask=brain_mask,
-        #         tr=tr,
-        #         header=img_header
-        #     )
-        #     variance_img_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-stdscale-variance{img_suffix}"
-        #     logger.info(f" saving session-level variance (of unmasked frames) to file: {variance_img_filename}")
-        #     nib.save(
-        #         variance_img,
-        #         variance_img_filename
-        #     )
-        #     mean_img, img_suffix = create_image(
-        #         data=mean_arr[np.newaxis, :],
-        #         imagetype=imagetype,
-        #         brain_mask=brain_mask,
-        #         tr=tr,
-        #         header=img_header
-        #     )
-        #     mean_img_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}-stdscale-mean{img_suffix}"
-        #     logger.info(f" saving session-level mean (of unmasked frames) to file: {mean_img_filename}")
-        #     nib.save(
-        #         mean_img,
-        #         mean_img_filename
-        #     )
         step_count += 1
         # save out the beta values
         logger.info("saving betas from GLM into files")
