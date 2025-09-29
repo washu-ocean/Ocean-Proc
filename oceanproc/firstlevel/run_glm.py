@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import numpy as np
 import sys
 import os
 from pathlib import Path
@@ -8,9 +7,7 @@ import numpy.typing as npt
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import nibabel as nib
-# from nilearn.glm.first_level import FirstLevelModel
-# from nilearn.plotting import plot_design_matrix
-# import matplotlib.pyplot as plt
+import numpy as np
 import nilearn.masking as nmask
 from nilearn.signal import butterworth, _handle_scrubbed_volumes
 from scipy import signal
@@ -22,6 +19,7 @@ import logging
 import argparse
 import datetime
 from textwrap import dedent
+
 
 """
 TODO:
@@ -98,6 +96,24 @@ def demean_detrend(func_data: npt.ArrayLike) -> np.ndarray:
     """
     data_dd = signal.detrend(func_data, axis=0, type='linear')
     return data_dd
+
+
+def percent_signal_change(data: npt.ArrayLike, mask: npt.ArrayLike):
+    masked_data = data[mask, :]
+    mean = np.nanmean(masked_data, axis=0)
+    mean = np.repeat(mean[np.newaxis,:], data.shape[0], axis=0)
+    psc_data = ((data - mean) / np.abs(mean)) * 100
+    non_valid_indices = np.where(~np.isfinite(psc_data))
+    if len(non_valid_indices[0]) > 0:
+        logger.warning("Found vertices with zero signal, setting these to zero")
+    psc_data[np.where(~np.isfinite(psc_data))] = 0
+
+    return psc_data
+
+
+def avg_tsnr(fdata, axis=0):
+    tsnr = np.nanmean(fdata, axis=axis) / np.nanstd(fdata, axis=axis)
+    return np.nanmean(tsnr)
 
 
 def create_hrf(time, time_to_peak=5, undershoot_dur=12):
@@ -522,7 +538,8 @@ def create_final_design(data_list: list[npt.ArrayLike],
 @debug_logging
 def massuni_linGLM(func_data: npt.ArrayLike,
                    design_matrix: pd.DataFrame,
-                   mask: npt.ArrayLike):
+                   mask: npt.ArrayLike,
+                   stdscale: bool):
     """
     Compute the mass univariate GLM.
 
@@ -541,23 +558,23 @@ def massuni_linGLM(func_data: npt.ArrayLike,
 
     # apply the mask to the data
     design_matrix = design_matrix.to_numpy()
-    masked_func_data = func_data.copy()[mask, :]
-    masked_design_matrix = design_matrix.copy()[mask, :]
-
-    func_ss = StandardScaler()
-    design_ss = StandardScaler()
+    if stdscale:
+        masked_func_data = StandardScaler().fit_transform(func_data.copy()[mask, :])
+        masked_design_matrix = StandardScaler().fit_transform(design_matrix.copy()[mask, :])
+    else:
+        masked_func_data = func_data.copy()[mask, :]
+        masked_design_matrix = design_matrix.copy()[mask, :]
 
     # standardize the masked data
-    masked_func_data = func_ss.fit_transform(masked_func_data)
-    masked_design_matrix = design_ss.fit_transform(masked_design_matrix)
 
     # comput beta values
     inv_mat = np.linalg.pinv(masked_design_matrix)
     beta_data = np.dot(inv_mat, masked_func_data)
 
     # standardize the unmasked data
-    func_data = func_ss.transform(func_data)
-    design_matrix = design_ss.transform(design_matrix)
+    if stdscale:
+        func_data = StandardScaler().transform(func_data)
+        design_matrix = StandardScaler().transform(design_matrix)
 
     # compute the residuals with unmasked data
     est_values = np.dot(design_matrix, beta_data)
@@ -585,6 +602,7 @@ def autogenerate_mask(mask_files: list[Path], output_path: Path) -> Path:
 
 
 def main():
+
     parser = OceanParser(
         prog="oceanfla",
         description="Ocean Labs first level analysis",
@@ -664,6 +682,8 @@ def main():
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
                                   help="""Flag to demean and detrend the data before modeling. The default is to include
                         a mean and trend line into the nuisance matrix instead.""")
+    config_arguments.add_argument("--percent_change", "-pc", action="store_true",
+                                  help="""Flag convert data to percent signal change.""")
     config_arguments.add_argument("--no_global_mean", action="store_true",
                                   help="Flag to indicate that you do not want to include a global mean into the model.")
     high_motion_params = config_arguments.add_mutually_exclusive_group()
@@ -673,6 +693,10 @@ def main():
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
     config_arguments.add_argument("--run_exclusion_threshold", "-re", type=int,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
+    config_arguments.add_argument("--min_average_tsnr", type=float,
+                                  help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in analysis.")
+    config_arguments.add_argument("--min_run_threshold", type=int,
+                                  help="The minimum number of unexcluded runs required to run the GLM")
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
                                   help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
                                   all nuisance/confound variables will be included""")
@@ -696,8 +720,14 @@ def main():
                                   help="The confound columns to include in the expansion. Must be specifed with the '--volterra_lag' option.")
     config_arguments.add_argument("--parcellate", "-parc", type=Path,
                                   help="Path to a dlabel file to use for parcellation of a dtseries")
+    config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="both",
+                                  help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
+    config_arguments.add_argument("--np_random_seed", type=int, default=42,
+                                  help="Set Numpy seed (default is 42)")
 
     args = parser.parse_args()
+
+    np.random.default_rng(seed=args.np_random_seed)
 
     if args.hrf is not None and args.fir is not None:
         if not args.fir_vars or not args.hrf_vars:
@@ -881,6 +911,7 @@ def main():
             tr = tr if tr else read_tr
             img_header = img_header if img_header else read_header
 
+            step_count = 0
             # create the events matrix
             logger.info(" reading events file and creating design matrix")
             events_long = None
@@ -955,6 +986,10 @@ def main():
                 if args.run_exclusion_threshold and (frame_retention_percent < args.run_exclusion_threshold):
                     logger.info(f" BOLD run: {run_map['bold']} has fell below the run exclusion threshold of {args.run_exclusion_threshold}% and will not be used in the final GLM.")
                     continue
+                run_tsnr = avg_tsnr(func_data[run_mask, :])
+                if args.min_average_tsnr and run_tsnr < args.min_average_tsnr:
+                    logger.info(f" BOLD run: {run_map['bold']} has average TSNR {run_tsnr} below the average TSNR exclusion threshold of {args.min_average_tsnr} and will not be used in the final GLM.")
+                    continue
 
             # save out the nuisance matrix and events matrix (if debug)
             noise_df_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_nuisance.csv"
@@ -972,6 +1007,27 @@ def main():
                 logger.debug(f" saving events matrix to file: {events_df_filename}")
                 events_df.to_csv(events_df_filename)
                 unmodified_output_dir_contents.discard(events_df_filename)
+
+            if args.percent_change:
+                func_data_psc = percent_signal_change(func_data, run_mask)
+                run_map["data_psc"] = func_data_psc
+                func_data = func_data_psc
+                step_count += 1
+                if flags.debug:
+                    pscimg, img_suffix = create_image(
+                        data=func_data,
+                        imagetype=imagetype,
+                        brain_mask=brain_mask,
+                        tr=tr,
+                        header=img_header
+                    )
+                    cleaned_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_step-{step_count}_psc{img_suffix}"
+                    logger.debug(f" saving BOLD data after detrending to file: {cleaned_filename}")
+                    nib.save(
+                        pscimg,
+                        cleaned_filename
+                    )
+                    unmodified_output_dir_contents.discard(cleaned_filename)
 
             # detrend the BOLD data if specifed
             if args.detrend_data:
@@ -997,16 +1053,7 @@ def main():
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
 
-            # demean and detrend if filtering is requested
-            if (args.highpass is not None or args.lowpass is not None):
-                if "mean" not in args.nuisance_regression:
-                    logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
-                    args.nuisance_regression.append("mean")
-                if "trend" not in args.nuisance_regression:
-                    logger.warning("High-, low-, or band-pass specified, but trend not specified as nuisance regressor -- adding this in automatically")
-                    args.nuisance_regression.append("trend")
-
-            # nuisance regression if specified        
+            # nuisance regression if specified
             if len(args.nuisance_regression) > 0:
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
                 if args.nuisance_fd:
@@ -1044,12 +1091,13 @@ def main():
                 nuisance_betas, func_data_residuals = massuni_linGLM(
                     func_data=func_data,
                     design_matrix=noise_regression_df,
-                    mask=nuisance_mask
+                    mask=nuisance_mask,
+                    stdscale=args.stdscale_glm in ("both", "runlevel")
                 )
 
                 run_map["data_resids"] = func_data_residuals
                 func_data = func_data_residuals
-
+                step_count += 1
                 if flags.debug:
                     # save out the BOLD data after nuisance regression
                     nrimg, img_suffix = create_image(
@@ -1059,7 +1107,7 @@ def main():
                         tr=tr,
                         header=img_header
                     )
-                    nr_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_nuisance-regressed{img_suffix}"
+                    nr_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_step-{step_count}_nuisance-regressed{img_suffix}"
                     logger.debug(f" saving BOLD data after nuisance regression to file: {nr_filename}")
                     nib.save(
                         nrimg,
@@ -1098,6 +1146,7 @@ def main():
                 )
                 run_map["data_filtered"] = func_data_filtered
                 func_data = func_data_filtered
+                step_count += 1
                 if flags.debug:
                     cleanimg, img_suffix = create_image(
                         data=func_data,
@@ -1106,7 +1155,7 @@ def main():
                         tr=tr,
                         header=img_header
                     )
-                    filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_filtered{img_suffix}"
+                    filtered_filename = args.output_dir / f"{run_file_base}_desc-model-{model_type}{user_desc}_step-{step_count}_filtered{img_suffix}"
                     logger.debug(f" saving BOLD data after filtering to file: {filtered_filename}")
                     nib.save(
                         cleanimg,
@@ -1137,6 +1186,9 @@ def main():
         if len(func_data_list) == 0:
             logger.info(f"all run have been excluded with the run exclusion threshold of {args.run_exclusion_threshold}%, try lowering this parameter before running again!")
             return
+        elif len(func_data_list) < args.min_run_threshold:
+            logger.info(f"At least {args.min_run_threshold} runs must be present to run the GLM")
+            return
 
         # create the final design matrix and append the data together
         logger.info("concatenating run level BOLD data and design matrices for GLM")
@@ -1166,9 +1218,10 @@ def main():
         activation_betas, func_residual = massuni_linGLM(
             func_data=final_func_data,
             design_matrix=final_design_unmasked,
-            mask=final_high_motion_mask
+            mask=final_high_motion_mask,
+            stdscale=args.stdscale_glm in ("seslevel", "both")
         )
-
+        step_count += 1
         # save out the beta values
         logger.info("saving betas from GLM into files")
         fir_betas_to_combine = set()
@@ -1283,7 +1336,7 @@ def main():
                 tr=tr,
                 header=img_header
             )
-            resid_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}{user_desc}_residual{img_suffix}"
+            resid_filename = args.output_dir / f"{file_name_base}_desc-model-{model_type}{user_desc}_step-{step_count}_residual{img_suffix}"
             logger.debug(f" saving residual BOLD data after final GLM to file: {resid_filename}")
             nib.save(
                 resid_img,

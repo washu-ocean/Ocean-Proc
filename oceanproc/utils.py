@@ -15,13 +15,13 @@ logger = logging.getLogger(__name__)
 
 default_log_format = "%(levelname)s:%(asctime)s:%(module)s: %(message)s"
 
-flags = SimpleNamespace(debug = False, longitudinal = False, infant = False)
+flags = SimpleNamespace(debug=False, longitudinal=False, infant=False)
 
 bids_entities = ["sub", "ses", "sample", "task", "tracksys",
-                "acq", "ce", "trc", "stain", "rec", "dir",
-                "run", "mod", "echo", "flip", "inv", "mt",
-                "part", "proc", "hemi", "space", "split", "recording",
-                "chunk", "seg", "res", "den", "label", "desc"]
+                 "acq", "ce", "trc", "stain", "rec", "dir",
+                 "run", "mod", "echo", "flip", "inv", "mt",
+                 "part", "proc", "hemi", "space", "split", "recording",
+                 "chunk", "seg", "res", "den", "label", "desc"]
 
 cifti_files = [
     ".dtseries.nii",
@@ -44,6 +44,8 @@ def logger_exception_hook(exctype, value, traceback):
 
     # Where the exception occured
     logger.exception(f"File {filename} line {line_no}, in {name}", exc_info=(exctype, value, traceback))
+
+
 sys.excepthook = logger_exception_hook
 
 
@@ -82,7 +84,7 @@ def debug_logging(func):
     return inner
 
 
-def exit_program_early(msg:str, 
+def exit_program_early(msg:str,
                        exit_func=None):
     """
     Exit the program while printing parameter 'msg'. If an exit
@@ -111,11 +113,12 @@ def prompt_user_continue(msg:str) -> bool:
 
     """
     prompt_msg = f"{msg} \n\t---(press 'y' for yes, other input will mean no)"
-    user_continue = input(prompt_msg+"\n")
+    user_continue = input(prompt_msg + "\n")
     ans = (user_continue.lower() == "y")
     logger.debug(f"User Prompt: {prompt_msg}")
     logger.debug(f"User Response:  {user_continue} ({ans})")
     return ans
+
 
 def extract_options(option_chain:list) -> dict:
     val = None
@@ -123,7 +126,7 @@ def extract_options(option_chain:list) -> dict:
     key = None
     if len(option_chain) < 1:
         return opts
-    
+
     if not (isinstance(option_chain[0], str) and option_chain[0].startswith("-")):
         exit_program_early(f"cannot parse option chain: {option_chain}")
 
@@ -145,10 +148,11 @@ def extract_options(option_chain:list) -> dict:
             opts[key] = val if val else True
     return opts
 
-def make_option(value, 
-                key: str=None, 
-                delimeter: str=" ", 
-                convert_underscore: bool=False):
+
+def make_option(value,
+                key: str = None,
+                delimeter: str = " ",
+                convert_underscore: bool = False):
     """
     Generate a string, representing an option that gets fed into a subprocess or script.
 
@@ -188,9 +192,9 @@ def make_option(value,
     return f"--{key}{second_part}" if key else second_part
 
 
-def add_file_handler(this_logger: logging.Logger, 
-                     log_path: Path, 
-                     format_str: str=default_log_format):
+def add_file_handler(this_logger: logging.Logger,
+                     log_path: Path,
+                     format_str: str = default_log_format):
     """
     Adds a file handler with the input file path and input message formatting to the input logger.
     The default message formatting in defined at the top of this file.
@@ -207,7 +211,7 @@ def add_file_handler(this_logger: logging.Logger,
     this_logger.addHandler(file_handler)
 
 
-def prepare_subprocess_logging(this_logger, 
+def prepare_subprocess_logging(this_logger,
                                stop=False):
     """
     Prepares a logger for piping subprocess outputs to its handlers. This function removes 
@@ -231,6 +235,7 @@ def prepare_subprocess_logging(this_logger,
                 h.setFormatter(logging.Formatter("%(message)s"))
                 h.terminator = ""
             this_logger = this_logger.parent
+
 
 @debug_logging
 def run_subprocess(cmd: str, title: str):
@@ -268,11 +273,12 @@ def log_linebreak():
             h.setFormatter(logging.Formatter(default_log_format))
         traverse_logger = traverse_logger.parent
 
+
 @debug_logging
-def export_args_to_file(args, 
-                        argument_group, 
+def export_args_to_file(args,
+                        argument_group,
                         file_path: Path,
-                        extra_args:dict=None):
+                        extra_args:dict = None):
     """
     Takes the arguments in the argument group, and exports their names and values in the 'args'
     namespace to a file specified at 'file_path'. The input 'file_path' can either be a txt
@@ -318,21 +324,23 @@ def export_args_to_file(args,
                 f.write(f"{k}{make_option(value=v)}\n")
 
 
-def is_cifti_file(file: str|Path) -> str|None:
+def is_cifti_file(file: str | Path) -> str | None:
     if isinstance(file, Path):
         file = str(file)
     suffix = [cf for cf in cifti_files if file.endswith(cf)]
     return suffix[0] if len(suffix) > 0 else None
 
-def is_nifti_file(file: str|Path) -> str|None:
+
+def is_nifti_file(file: str | Path) -> str | None:
     if isinstance(file, Path):
         file = str(file)
     not_cifti = is_cifti_file(file) is None
     suffix = [nf for nf in [".nii.gz", ".nii"] if file.endswith(nf)]
     return suffix[0] if (len(suffix) > 0) and not_cifti else None
 
+
 @debug_logging
-def load_data(func_file: str|Path,
+def load_data(func_file: str | Path,
               brain_mask: str = None,
               need_tr: bool = False,
               fwhm: float = None) -> np.ndarray:
@@ -346,22 +354,22 @@ def load_data(func_file: str|Path,
             tr = jd["RepetitionTime"]
 
     if is_cifti_file(func_file):
-        img = nib.load(func_file)
+        img = nib.load(os.readlink(func_file))
         return (img.get_fdata(), tr, img.header)
     elif is_nifti_file(func_file):
         if brain_mask:
-            img = nib.load(func_file)
+            img = nib.load(os.readlink(func_file))
             if fwhm is not None:
                 img = smooth_img(img, fwhm)
             return (nmask.apply_mask(img, brain_mask), tr, None)
         else:
             raise Exception("Volumetric data must also have an accompanying brain mask")
-            # return None 
+            # return None
 
 
-def parcellate_dtseries(dtseries_path: Path, 
+def parcellate_dtseries(dtseries_path: Path,
                         parc_dlabel_path: Path) -> Path:
-    
+
     ptseries_path = Path(str(dtseries_path.resolve()).replace("dtseries", "ptseries"))
     parcellate_cmd = f"""wb_command -cifti-parcellate {dtseries_path.resolve()}
                             {parc_dlabel_path.resolve()} COLUMN {ptseries_path.resolve()}"""

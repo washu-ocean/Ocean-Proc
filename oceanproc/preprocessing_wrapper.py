@@ -108,7 +108,7 @@ def run_preprocessing(subject:str,
     bids_mount = "/data"
     derivs_mount = "/out"
     work_mount = "/work"
-    preproc_command = f"""docker run --rm -it -u {uid}:{gid}
+    preproc_command = f"""docker run --rm -i -u {uid}:{gid}
                             -v {license_file.resolve()}:{license_mount}:ro
                             -v {bids_path.resolve()}:{bids_mount}:ro
                             -v {derivs_path.resolve()}:{derivs_mount}
