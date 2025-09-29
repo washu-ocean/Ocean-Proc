@@ -354,11 +354,11 @@ def load_data(func_file: str | Path,
             tr = jd["RepetitionTime"]
 
     if is_cifti_file(func_file):
-        img = nib.load(os.readlink(func_file))
+        img = nib.load(func_file)
         return (img.get_fdata(), tr, img.header)
     elif is_nifti_file(func_file):
         if brain_mask:
-            img = nib.load(os.readlink(func_file))
+            img = nib.load(func_file)
             if fwhm is not None:
                 img = smooth_img(img, fwhm)
             return (nmask.apply_mask(img, brain_mask), tr, None)
