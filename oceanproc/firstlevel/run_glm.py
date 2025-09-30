@@ -937,8 +937,8 @@ def main():
             noise_df = make_noise_ts(
                 confounds_file=run_map["confounds"],
                 confounds_columns=args.confounds,
-                demean=False, #(not args.detrend_data),
-                linear_trend=(not args.detrend_data),
+                demean=(args.highpass is not None or args.lowpass is not None or "mean" in args.nuisance_regression),
+                linear_trend=(args.highpass is not None or args.lowpass is not None or "trend" in args.nuisance_regression),
                 spike_threshold=args.fd_threshold if args.spike_regression else None,
                 volterra_expansion=args.volterra_lag,
                 volterra_columns=args.volterra_columns
@@ -1052,15 +1052,6 @@ def main():
                         cleaned_filename
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
-
-            # demean and detrend if filtering is requested
-            if (args.highpass is not None or args.lowpass is not None):
-                if "mean" not in args.nuisance_regression:
-                    logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
-                    args.nuisance_regression.append("mean")
-                if "trend" not in args.nuisance_regression:
-                    logger.warning("High-, low-, or band-pass specified, but trend not specified as nuisance regressor -- adding this in automatically")
-                    args.nuisance_regression.append("trend")
 
             # nuisance regression if specified
             if len(args.nuisance_regression) > 0:
