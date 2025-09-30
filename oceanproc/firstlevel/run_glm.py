@@ -481,7 +481,7 @@ def filter_data(func_data: npt.ArrayLike,
         assert filtered_data.shape[0] == func_data.shape[0], "Filtered data must have the same number of timepoints as the original functional data"
     else:
         filtered_data = butterworth(
-            signals=func_data,
+            signals=padded_func_data,
             sampling_rate=1.0 / tr,
             low_pass=low_pass,
             high_pass=high_pass,
