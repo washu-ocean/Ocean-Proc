@@ -566,9 +566,12 @@ def massuni_linGLM(func_data: npt.ArrayLike,
 
     # apply the mask to the data
     design_matrix = design_matrix.to_numpy()
+
+    func_ss = StandardScaler()
+    design_ss = StandardScaler()
     if stdscale:
-        masked_func_data = StandardScaler().fit_transform(func_data.copy()[mask, :])
-        masked_design_matrix = StandardScaler().fit_transform(design_matrix.copy()[mask, :])
+        masked_func_data = func_ss.fit_transform(func_data.copy()[mask, :])
+        masked_design_matrix = design_ss.fit_transform(design_matrix.copy()[mask, :])
     else:
         masked_func_data = func_data.copy()[mask, :]
         masked_design_matrix = design_matrix.copy()[mask, :]
@@ -581,8 +584,8 @@ def massuni_linGLM(func_data: npt.ArrayLike,
 
     # standardize the unmasked data
     if stdscale:
-        func_data = StandardScaler().fit_transform(func_data)
-        design_matrix = StandardScaler().fit_transform(design_matrix)
+        func_data = func_ss.transform(func_data)
+        design_matrix = design_ss.transform(design_matrix)
 
     # compute the residuals with unmasked data
     est_values = np.dot(design_matrix, beta_data)
@@ -1036,6 +1039,8 @@ def main():
                         cleaned_filename
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
+        
+
 
             # detrend the BOLD data if specifed
             if args.detrend_data:
@@ -1060,6 +1065,16 @@ def main():
                         cleaned_filename
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
+
+
+            # demean and detrend if filtering is requested
+            if (args.highpass is not None or args.lowpass is not None):
+                if "mean" not in args.nuisance_regression:
+                    logger.warning("High-, low-, or band-pass specified, but mean not specified as a nuisance regressor -- adding this in automatically")
+                    args.nuisance_regression.append("mean")
+                if "trend" not in args.nuisance_regression:
+                    logger.warning("High-, low-, or band-pass specified, but mean not specified as a nuisance regressor -- adding this in automatically")
+                    args.nuisance_regression.append("trend")
 
             # nuisance regression if specified
             if len(args.nuisance_regression) > 0:
