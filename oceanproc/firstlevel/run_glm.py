@@ -720,7 +720,7 @@ def main():
                                   help="The confound columns to include in the expansion. Must be specifed with the '--volterra_lag' option.")
     config_arguments.add_argument("--parcellate", "-parc", type=Path,
                                   help="Path to a dlabel file to use for parcellation of a dtseries")
-    config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="both",
+    config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="seslevel",
                                   help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
     config_arguments.add_argument("--np_random_seed", type=int, default=42,
                                   help="Set Numpy seed (default is 42)")
