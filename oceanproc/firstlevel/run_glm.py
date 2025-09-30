@@ -437,6 +437,7 @@ def filter_data(func_data: npt.ArrayLike,
     if not any((
         padtype == "none",
         padlen is None,
+        padlen == -1,
         (padtype != "zero" and padlen is not None and padlen > 0),
         (padtype == "zero" and padlen is not None and padlen >= 2),
     )):
