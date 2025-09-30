@@ -384,7 +384,7 @@ def filter_data(func_data: npt.ArrayLike,
                 low_pass: float = 0.1,
                 high_pass: float = 0.008,
                 padtype: str = "zero",
-                padlen: int | NoneType = 50):
+                padlen: int = 50):
     """
     Apply a lowpass, highpass, or bandpass filter to the functional data. Masked frames
     are interploated using a cubic splice function before filtering. The returned array
@@ -441,13 +441,19 @@ def filter_data(func_data: npt.ArrayLike,
         (padtype == "zero" and padlen is not None and padlen >= 2),
     )):
         raise ValueError(f"Pad length of {padlen} incompatible with pad type {'odd' if padtype is None else padtype}")
-
+    
+    if padlen == -1:
+        padlen = None
     # temporary fix for filter padding --- THIS MANUAL PADDING SEEMS TO FIX THE BIMODAL BETA DISTRIBUTION ---- ADDITIONAL TESTING MAY STILL BE NEEDED
     # padlen = 50
     # padtype = "zero"
-
-    padded_func_data = np.pad(func_data, ((padlen, padlen), (0, 0)), mode='constant', constant_values=0)
-    padded_mask = np.pad(mask, (padlen, padlen), mode='constant', constant_values=True)
+    
+    if padlen > 0:
+        padded_func_data = np.pad(func_data, ((padlen, padlen), (0, 0)), mode='constant', constant_values=0)
+        padded_mask = np.pad(mask, (padlen, padlen), mode='constant', constant_values=True)
+    else:
+        padded_func_data = func_data
+        padded_mask = mask
 
     # if the mask is excluding frames, interpolate the censored frames
     if np.sum(mask) < mask.shape[0]:
