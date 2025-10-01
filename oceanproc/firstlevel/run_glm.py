@@ -655,7 +655,7 @@ def main():
                                   help="Path to the BIDS formatted derivatives directory containing processed outputs.")
     config_arguments.add_argument("--preproc_subfolder", "-pd", type=str, default="fmriprep",
                                   help="Name of the subfolder in the derivatives directory containing the preprocessed bold data. Default is 'fmriprep'")
-    config_arguments.add_argument("--raw_bids", "-r", type=Path, required=True,
+    config_arguments.add_argument("--raw_bids", "-r", type=Path,
                                   help="Path to the BIDS formatted raw data directory for this dataset.")
     config_arguments.add_argument("--derivs_subfolder", "-ds", default="first_level",
                                   help="The name of the subfolder in the derivatives directory where bids style outputs should be stored. The default is 'first_level'.")
