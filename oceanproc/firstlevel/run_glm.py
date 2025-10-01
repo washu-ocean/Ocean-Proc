@@ -905,7 +905,7 @@ def main():
             for idx, event_search_path in enumerate(event_search_paths):
                 event_glob = f"{bold_base}*_events{'_long' if args.events_long else ''}.csv"
                 event_files = list(event_search_path.rglob(event_glob))
-                logger.info(f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(event_search_path / "**" + str(event_glob))}")
+                logger.info(f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(event_search_path) + "/**/" + str(event_glob)}")
                 if not len(event_files) == 1:
                     continue
                 file_map["events"] = event_files[0]
