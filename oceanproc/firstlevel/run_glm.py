@@ -984,6 +984,10 @@ def main():
                         for i in range(pad_width, len(fd_arr_padded) - pad_width):
                             if all(fd_arr_padded[range(i - pad_width, i + pad_width + 1)] < args.fd_threshold):
                                 fd_mask[i] = True
+                            elif i - pad_width < pad_width and all(fd_arr_padded[range(pad_width, i + pad_width + 1)] < args.fd_threshold):
+                                fd_mask[i] = True
+                            elif i + pad_width + 1 > len(fd_arr_padded) - pad_width and all(fd_arr_padded[range(i - pad_width, len(fd_arr_padded) - pad_width)] < args.fd_threshold):
+                                fd_mask[i] = True
                             else:
                                 fd_mask[i] = False
                         fd_mask = fd_mask[pad_width:-pad_width]
