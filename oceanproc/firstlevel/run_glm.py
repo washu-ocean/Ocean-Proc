@@ -871,18 +871,16 @@ def main():
             confounds_files = list(bold_path.parent.glob(confounds_search_path))
             assert len(confounds_files) == 1, f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}"
             if args.classic_fd:  # Make .tsv file out of .FD file (this just adds columns and removes first derivative, may change this behavior in the future)
-                (
-                    pd.read_csv(
-                        os.readlink(confounds_files[0]) if op.islink(confounds_files[0]) else confounds_files[0],
-                        sep="\t",
-                        header=None
-                    )
-                    .drop(1, axis=1, inplace=True)  # drop first derivative in second column
-                    .rename(columns={0: "framewise_displacement"}, inplace=True)
-                    .to_csv(
-                        converted_fd_tsv := Path(f"{bold_base}_desc*-confounds_timeseries.tsv"),
-                        sep="\t"
-                    )
+                fd_df = pd.read_csv(
+                    os.readlink(confounds_files[0]) if op.islink(confounds_files[0]) else confounds_files[0],
+                    sep="\t",
+                    header=None
+                )
+                fd_df.drop(1, axis=1, inplace=True)  # drop first derivative in second column
+                fd_df.rename(columns={0: "framewise_displacement"}, inplace=True)
+                fd_df.to_csv(
+                    converted_fd_tsv := Path(f"{bold_base}_desc*-confounds_timeseries.tsv"),
+                    sep="\t"
                 )
                 file_map["confounds"] = converted_fd_tsv
             else:
