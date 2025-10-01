@@ -42,7 +42,7 @@ def make_events_long(event_file:Path, volumes: int, tr:float, output_file:Path =
     """
 
     duration = tr * volumes
-    events_df = pd.read_csv(event_file, index_col=None, delimiter="\t")
+    events_df = pd.read_csv(event_file, index_col=None, sep="," if str(event_file).endswith(".csv") else "\t")
     conditions = [s for s in np.unique(events_df.trial_type)]
     events_long = pd.DataFrame(0, columns=conditions, index=np.arange(0,duration,tr)[:volumes])
 
@@ -73,7 +73,7 @@ def append_to_confounds(confounds_file:Path, fd_thresh:float):
     :param fd_thresh: Framewise displacement threshold for this functional run
     :type fd_thresh: float
     """
-    conf_df = pd.read_csv(confounds_file, delimiter="\t")
+    conf_df = pd.read_csv(confounds_file, sep="," if str(confounds_file).endswith('.csv') else "\t")
     b = 0
     for a in range(len(conf_df)):
         if conf_df.loc[a, "framewise_displacement"] > fd_thresh:

@@ -232,7 +232,7 @@ def make_noise_ts(confounds_file: str,
         select_columns.update(volterra_columns)
     if spike_threshold:
         select_columns.add(fd)
-    nuisance = pd.read_csv(confounds_file, delimiter='\t').loc[:,list(select_columns)]
+    nuisance = pd.read_csv(confounds_file, sep="," if confounds_file.endswith(".csv") else "\t").loc[:,list(select_columns)]
     if fd in select_columns:
         nuisance.loc[0, fd] = 0
 
@@ -952,7 +952,10 @@ def main():
             logger.info(" reading events file and creating design matrix")
             events_long = None
             if args.events_long:
-                events_long = pd.read_csv(run_map["events"], index_col=0)
+                events_long = pd.read_csv(
+                    run_map["events"],
+                    index_col=0,
+                    sep="," if str(run_map["events"]).endswith('.csv') else "\t")
             else:
                 events_long = make_events_long(
                     event_file=run_map["events"],
@@ -1001,7 +1004,7 @@ def main():
 
                 elif args.fd_censoring:
                     logger.info(f" censoring timepoints using a high motion mask with a framewise displacement threshold of {args.fd_threshold}")
-                    confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
+                    confounds_df = pd.read_csv(run_map["confounds"], sep="," if str(run_map["confounds"]).endswith(".csv") else "\t")
                     fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
                     if args.minimum_unmasked_neighbors:
                         fd_arr_padded = np.pad(fd_arr, pad_width := args.minimum_unmasked_neighbors)
@@ -1103,7 +1106,7 @@ def main():
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
                 if args.nuisance_fd:
                     logger.info(f" censoring timepoints for nuisance regression using the framewise displacement threshold of {args.nuisance_fd}")
-                    confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
+                    confounds_df = pd.read_csv(run_map["confounds"], sep="," if str(run_map["confounds"]).endswith(".csv") else "\t")
                     nuisance_fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
                     if args.minimum_unmasked_neighbors:
                         nuisance_fd_arr_padded = np.pad(nuisance_fd_arr, pad_width := args.minimum_unmasked_neighbors)
