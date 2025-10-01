@@ -879,7 +879,7 @@ def main():
                 fd_df.drop(1, axis=1, inplace=True)  # drop first derivative in second column
                 fd_df.rename(columns={0: "framewise_displacement"}, inplace=True)
                 fd_df.to_csv(
-                    converted_fd_tsv := Path(f"{bold_base}_desc*-confounds_timeseries.tsv"),
+                    converted_fd_tsv := Path(confounds_files[0].replace('.FD', '.tsv')),
                     sep="\t"
                 )
                 file_map["confounds"] = converted_fd_tsv
@@ -894,7 +894,7 @@ def main():
                 else:
                     file_map["tmask"] = tmask_files[0]
 
-            event_search_paths = [args.derivs_dir]
+            event_search_paths = [preproc_derivs]
             if args.raw_bids:
                 event_search_paths.insert(0, args.raw_bids)
             if args.events_long:
@@ -907,6 +907,7 @@ def main():
                 if not len(event_files) == 1:
                     continue
                 file_map["events"] = event_files[0]
+                break
             if file_map["events"] is None:
                 raise FileNotFoundError(f"Found no event files in these directories: {', '.join([str(p) for p in event_search_paths])}")
 
