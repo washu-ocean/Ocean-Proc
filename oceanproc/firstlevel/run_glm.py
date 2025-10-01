@@ -884,7 +884,7 @@ def main():
                 )
                 file_map["confounds"] = converted_fd_tsv
             else:
-                file_map["confounds"] = confounds_files[0]
+                file_map["confounds"] = confounds_files[0] if not op.islink(confounds_files[0]) else os.readlink(confounds_files[0])
 
             if args.tmask:
                 tmask_search_path = f"{bold_base}*_tmask.txt"
