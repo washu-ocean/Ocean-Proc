@@ -9,6 +9,7 @@ import nibabel as nib
 import nilearn.masking as nmask
 from nilearn.image import smooth_img
 import os
+import os.path as op
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -344,11 +345,17 @@ def load_data(func_file: str | Path,
               brain_mask: str = None,
               need_tr: bool = False,
               fwhm: float = None) -> np.ndarray:
-    tr = None
     func_file = str(func_file)
+    if op.islink(func_file):
+        func_file = os.readlink(func_file)
+
+    if brain_mask is not None and op.islink(brain_mask):
+        brain_mask = os.readlink(brain_mask)
+
+    tr = None
     if need_tr:
         sidecar_file = func_file.split(".")[0] + ".json"
-        assert os.path.isfile(sidecar_file), f"Cannot find the .json sidecar file for bold run: {func_file}"
+        assert op.isfile(sidecar_file), f"Cannot find the .json sidecar file for bold run: {func_file}"
         with open(sidecar_file, "r") as f:
             jd = json.load(f)
             tr = jd["RepetitionTime"]

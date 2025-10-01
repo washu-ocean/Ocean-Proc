@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import os.path as op
 from pathlib import Path
 import json
 import numpy.typing as npt
@@ -218,7 +219,7 @@ def find_nearest(array, value):
 
 
 @debug_logging
-def make_noise_ts(confounds_file: str,
+def make_noise_ts(confounds_file: Path,
                   confounds_columns: list,
                   demean: bool = False,
                   linear_trend: bool = False,
@@ -231,7 +232,7 @@ def make_noise_ts(confounds_file: str,
         select_columns.update(volterra_columns)
     if spike_threshold:
         select_columns.add(fd)
-    nuisance = pd.read_csv(confounds_file, delimiter='\t').loc[:,list(select_columns)]
+    nuisance = pd.read_csv(confounds_file, sep="," if str(confounds_file).endswith(".csv") else "\t").loc[:,list(select_columns)]
     if fd in select_columns:
         nuisance.loc[0, fd] = 0
 
@@ -442,11 +443,11 @@ def filter_data(func_data: npt.ArrayLike,
         (padtype == "zero" and padlen is not None and padlen >= 2),
     )):
         raise ValueError(f"Pad length of {padlen} incompatible with pad type {'odd' if padtype is None else padtype}")
-    
+
     # temporary fix for filter padding --- THIS MANUAL PADDING SEEMS TO FIX THE BIMODAL BETA DISTRIBUTION ---- ADDITIONAL TESTING MAY STILL BE NEEDED
     # padlen = 50
     # padtype = "zero"
-    
+
     if padlen > 0 and padtype == "zero":
         padded_func_data = np.pad(func_data, ((padlen, padlen), (0, 0)), mode='constant', constant_values=0)
         padded_mask = np.pad(mask, (padlen, padlen), mode='constant', constant_values=True)
@@ -654,7 +655,7 @@ def main():
                                   help="Path to the BIDS formatted derivatives directory containing processed outputs.")
     config_arguments.add_argument("--preproc_subfolder", "-pd", type=str, default="fmriprep",
                                   help="Name of the subfolder in the derivatives directory containing the preprocessed bold data. Default is 'fmriprep'")
-    config_arguments.add_argument("--raw_bids", "-r", type=Path, required=True,
+    config_arguments.add_argument("--raw_bids", "-r", type=Path,
                                   help="Path to the BIDS formatted raw data directory for this dataset.")
     config_arguments.add_argument("--derivs_subfolder", "-ds", default="first_level",
                                   help="The name of the subfolder in the derivatives directory where bids style outputs should be stored. The default is 'first_level'.")
@@ -719,6 +720,8 @@ def main():
     config_arguments.add_argument("--lowpass", "-lp", type=float, nargs="?", const=0.1,
                                   help="""The low pass cutoff frequency for signal filtering. Frequencies above this value (Hz) will be filtered out. If the argument
                         is supplied but no value is given, then the value will default to 0.1 Hz""")
+    config_arguments.add_argument("--classic_fd", action="store_true",
+                                  help="Search for 'classic' .FD files instead of .tsv files for confounds (only difference in naming is the suffix)")
     config_arguments.add_argument("--filter_padtype", default="zero",
                                   choices=["odd", "even", "zero", "constant", "none"],
                                   help="Type of padding to use for low-, high-, or band-pass filter, if one is applied.")
@@ -771,7 +774,6 @@ def main():
 
     try:
         assert args.derivs_dir.is_dir(), "Derivatives directory must exist but is not found"
-        assert args.raw_bids.is_dir(), "Raw data directory must exist but is not found"
     except AssertionError as e:
         logger.exception(e)
         exit_program_early(e)
@@ -864,10 +866,25 @@ def main():
             bold_base = bold_path.name.split("_space")[0]
             bold_base = bold_base.split("_desc")[0]
 
-            confounds_search_path = f"{bold_base}_desc*-confounds_timeseries.tsv"
+            confounds_suffix = "FD" if args.classic_fd else "[ct]sv"
+            confounds_search_path = f"{bold_base}_desc*-confounds_timeseries.{confounds_suffix}"
             confounds_files = list(bold_path.parent.glob(confounds_search_path))
             assert len(confounds_files) == 1, f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}"
-            file_map["confounds"] = confounds_files[0]
+            if args.classic_fd:  # Make .tsv file out of .FD file (this just adds columns and removes first derivative, may change this behavior in the future)
+                fd_df = pd.read_csv(
+                    os.readlink(confounds_files[0]) if op.islink(confounds_files[0]) else confounds_files[0],
+                    sep="\t",
+                    header=None
+                )
+                fd_df.drop(1, axis=1, inplace=True)  # drop first derivative in second column
+                fd_df.rename(columns={0: "framewise_displacement"}, inplace=True)
+                fd_df.to_csv(
+                    converted_fd_tsv := Path(str(confounds_files[0]).replace('.FD', '.tsv')),
+                    sep="\t"
+                )
+                file_map["confounds"] = converted_fd_tsv
+            else:
+                file_map["confounds"] = confounds_files[0] if not op.islink(confounds_files[0]) else os.readlink(confounds_files[0])
 
             if args.tmask:
                 tmask_search_path = f"{bold_base}*_tmask.txt"
@@ -877,18 +894,26 @@ def main():
                 else:
                     file_map["tmask"] = tmask_files[0]
 
+            event_search_paths = [preproc_derivs]
+            if args.raw_bids:
+                event_search_paths.insert(0, args.raw_bids)
             if args.events_long:
-                events_long_search_path = f"{bold_base}*_desc*events_long.csv"
-                glob_path = args.raw_bids / f"**/{events_long_search_path}"
-                events_long_files = list(args.events_long.glob(f"**/{events_long_search_path}"))
-                assert len(events_long_files) == 1, f"Found {len(events_long_files)} events long files for bold run: {str(bold_path)} search path: {str(glob_path)}"
-                file_map["events"] = events_long_files[0]
-            else:
-                event_search_path = f"{bold_base}*_events.tsv"
-                glob_path = args.raw_bids / f"**/{event_search_path}"
-                event_files = list(args.raw_bids.glob("**/" + event_search_path))
-                assert len(event_files) == 1, f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(glob_path)}"
+                event_search_paths.insert(0, args.events_long)
+            file_map["events"] = None
+            for idx, event_search_path in enumerate(event_search_paths):
+                event_glob = f"{bold_base}*_events{'_long' if args.events_long else ''}.[ct]sv"
+                event_files = list(event_search_path.rglob(event_glob))
+                logger.info(f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(event_search_path) + '/**/' + str(event_glob)}")
+                if not len(event_files) == 1:
+                    continue
                 file_map["events"] = event_files[0]
+                break
+            if file_map["events"] is None:
+                raise FileNotFoundError(dedent(f"""
+                    Found no event files in these directories:
+                    {', '.join([str(p) for p in event_search_paths])}
+                    {'(Maybe you forgot --raw_bids?)' if not args.raw_bids else ''}
+                """))
 
             file_map_list.append(file_map)
 
@@ -927,7 +952,10 @@ def main():
             logger.info(" reading events file and creating design matrix")
             events_long = None
             if args.events_long:
-                events_long = pd.read_csv(run_map["events"], index_col=0)
+                events_long = pd.read_csv(
+                    run_map["events"],
+                    index_col=0,
+                    sep="," if str(run_map["events"]).endswith('.csv') else "\t")
             else:
                 events_long = make_events_long(
                     event_file=run_map["events"],
@@ -976,7 +1004,7 @@ def main():
 
                 elif args.fd_censoring:
                     logger.info(f" censoring timepoints using a high motion mask with a framewise displacement threshold of {args.fd_threshold}")
-                    confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
+                    confounds_df = pd.read_csv(run_map["confounds"], sep="," if str(run_map["confounds"]).endswith(".csv") else "\t")
                     fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
                     if args.minimum_unmasked_neighbors:
                         fd_arr_padded = np.pad(fd_arr, pad_width := args.minimum_unmasked_neighbors)
@@ -1043,8 +1071,6 @@ def main():
                         cleaned_filename
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
-        
-
 
             # detrend the BOLD data if specifed
             if args.detrend_data:
@@ -1070,7 +1096,6 @@ def main():
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
 
-
             # demean and detrend if filtering is requested
             if (args.highpass is not None or args.lowpass is not None):
                 if "mean" not in args.nuisance_regression:
@@ -1085,7 +1110,7 @@ def main():
                 nuisance_mask = np.ones(shape=(func_data.shape[0],)).astype(bool)
                 if args.nuisance_fd:
                     logger.info(f" censoring timepoints for nuisance regression using the framewise displacement threshold of {args.nuisance_fd}")
-                    confounds_df = pd.read_csv(run_map["confounds"], sep="\t")
+                    confounds_df = pd.read_csv(run_map["confounds"], sep="," if str(run_map["confounds"]).endswith(".csv") else "\t")
                     nuisance_fd_arr = confounds_df.loc[:, "framewise_displacement"].to_numpy()[acquisition_mask]
                     if args.minimum_unmasked_neighbors:
                         nuisance_fd_arr_padded = np.pad(nuisance_fd_arr, pad_width := args.minimum_unmasked_neighbors)
