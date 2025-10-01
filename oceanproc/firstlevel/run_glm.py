@@ -910,7 +910,7 @@ def main():
                     continue
                 file_map["events"] = event_files[0]
             if file_map["events"] is None:
-                raise FileNotFoundError(f"Found no event files in these directories: {'\n'.join([str(p) for p in event_search_paths])}")
+                raise FileNotFoundError(f"Found no event files in these directories: {', '.join([str(p) for p in event_search_paths])}")
 
             file_map_list.append(file_map)
 
