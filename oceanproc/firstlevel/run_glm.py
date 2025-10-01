@@ -774,7 +774,6 @@ def main():
 
     try:
         assert args.derivs_dir.is_dir(), "Derivatives directory must exist but is not found"
-        assert args.raw_bids.is_dir(), "Raw data directory must exist but is not found"
     except AssertionError as e:
         logger.exception(e)
         exit_program_early(e)
@@ -897,18 +896,21 @@ def main():
                 else:
                     file_map["tmask"] = tmask_files[0]
 
+            event_search_paths = [args.derivs_dir]
+            if args.raw_bids:
+                event_search_paths.insert(0, args.raw_bids)
             if args.events_long:
-                events_long_search_path = f"{bold_base}*_desc*events_long.csv"
-                glob_path = args.raw_bids / f"**/{events_long_search_path}"
-                events_long_files = list(args.events_long.glob(f"**/{events_long_search_path}"))
-                assert len(events_long_files) == 1, f"Found {len(events_long_files)} events long files for bold run: {str(bold_path)} search path: {str(glob_path)}"
-                file_map["events"] = events_long_files[0]
-            else:
-                event_search_path = f"{bold_base}*_events.tsv"
-                glob_path = args.raw_bids / f"**/{event_search_path}"
-                event_files = list(args.raw_bids.glob("**/" + event_search_path))
-                assert len(event_files) == 1, f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(glob_path)}"
+                event_search_paths.insert(0, args.events_long)
+            file_map["events"] = None
+            for idx, event_search_path in enumerate(event_search_paths):
+                event_glob = f"{bold_base}*_events{'_long' if args.events_long else ''}.csv"
+                event_files = list(event_search_path.rglob(event_glob))
+                logger.info(f"Found {len(event_files)} event files for bold run: {str(bold_path)} search path: {str(event_search_path / "**" + str(event_glob))}")
+                if not len(event_files) == 1:
+                    continue
                 file_map["events"] = event_files[0]
+            if file_map["events"] is None:
+                raise FileNotFoundError(f"Found no event files in these directories: {'\n'.join([str(p) for p in event_search_paths])}")
 
             file_map_list.append(file_map)
 
