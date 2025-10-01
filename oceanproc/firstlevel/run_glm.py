@@ -875,7 +875,7 @@ def main():
                     pd.read_csv(
                         os.readlink(confounds_files[0]) if op.islink(confounds_files[0]) else confounds_files[0],
                         sep="\t",
-                        header="none"
+                        header=None
                     )
                     .drop(1, axis=1, inplace=True)  # drop first derivative in second column
                     .rename(columns={0: "framewise_displacement"}, inplace=True)
