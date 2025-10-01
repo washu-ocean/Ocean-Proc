@@ -866,7 +866,7 @@ def main():
             bold_base = bold_path.name.split("_space")[0]
             bold_base = bold_base.split("_desc")[0]
 
-            confounds_suffix = "FD" if args.classic_fd else "tsv"
+            confounds_suffix = "FD" if args.classic_fd else "[ct]sv"
             confounds_search_path = f"{bold_base}_desc*-confounds_timeseries.{confounds_suffix}"
             confounds_files = list(bold_path.parent.glob(confounds_search_path))
             assert len(confounds_files) == 1, f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}"
