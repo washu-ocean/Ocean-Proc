@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import os.path as op
 from pathlib import Path
 import json
 import numpy.typing as npt
@@ -442,11 +443,11 @@ def filter_data(func_data: npt.ArrayLike,
         (padtype == "zero" and padlen is not None and padlen >= 2),
     )):
         raise ValueError(f"Pad length of {padlen} incompatible with pad type {'odd' if padtype is None else padtype}")
-    
+
     # temporary fix for filter padding --- THIS MANUAL PADDING SEEMS TO FIX THE BIMODAL BETA DISTRIBUTION ---- ADDITIONAL TESTING MAY STILL BE NEEDED
     # padlen = 50
     # padtype = "zero"
-    
+
     if padlen > 0 and padtype == "zero":
         padded_func_data = np.pad(func_data, ((padlen, padlen), (0, 0)), mode='constant', constant_values=0)
         padded_mask = np.pad(mask, (padlen, padlen), mode='constant', constant_values=True)
@@ -719,6 +720,8 @@ def main():
     config_arguments.add_argument("--lowpass", "-lp", type=float, nargs="?", const=0.1,
                                   help="""The low pass cutoff frequency for signal filtering. Frequencies above this value (Hz) will be filtered out. If the argument
                         is supplied but no value is given, then the value will default to 0.1 Hz""")
+    config_arguments.add_argument("--classic_fd", action="store_true",
+                                  help="Search for 'classic' .FD files instead of .tsv files for confounds (only difference in naming is the suffix)")
     config_arguments.add_argument("--filter_padtype", default="zero",
                                   choices=["odd", "even", "zero", "constant", "none"],
                                   help="Type of padding to use for low-, high-, or band-pass filter, if one is applied.")
@@ -864,10 +867,27 @@ def main():
             bold_base = bold_path.name.split("_space")[0]
             bold_base = bold_base.split("_desc")[0]
 
-            confounds_search_path = f"{bold_base}_desc*-confounds_timeseries.tsv"
+            confounds_suffix = "FD" if args.classic_fd else "tsv"
+            confounds_search_path = f"{bold_base}_desc*-confounds_timeseries.{confounds_suffix}"
             confounds_files = list(bold_path.parent.glob(confounds_search_path))
             assert len(confounds_files) == 1, f"Found {len(confounds_files)} confounds files for bold run: {str(bold_path)} search path: {confounds_search_path}"
-            file_map["confounds"] = confounds_files[0]
+            if args.classic_fd:  # Make .tsv file out of .FD file (this just adds columns and removes first derivative, may change this behavior in the future)
+                (
+                    pd.read_csv(
+                        os.readlink(confounds_files[0]) if op.islink(confounds_files[0]) else confounds_files[0],
+                        sep="\t",
+                        header="none"
+                    )
+                    .drop(1, axis=1, inplace=True)  # drop first derivative in second column
+                    .rename(columns={0: "framewise_displacement"}, inplace=True)
+                    .to_csv(
+                        converted_fd_tsv := Path(f"{bold_base}_desc*-confounds_timeseries.tsv"),
+                        sep="\t"
+                    )
+                )
+                file_map["confounds"] = converted_fd_tsv
+            else:
+                file_map["confounds"] = confounds_files[0]
 
             if args.tmask:
                 tmask_search_path = f"{bold_base}*_tmask.txt"
@@ -1039,8 +1059,6 @@ def main():
                         cleaned_filename
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
-        
-
 
             # detrend the BOLD data if specifed
             if args.detrend_data:
@@ -1065,7 +1083,6 @@ def main():
                         cleaned_filename
                     )
                     unmodified_output_dir_contents.discard(cleaned_filename)
-
 
             # demean and detrend if filtering is requested
             if (args.highpass is not None or args.lowpass is not None):
