@@ -219,7 +219,7 @@ def find_nearest(array, value):
 
 
 @debug_logging
-def make_noise_ts(confounds_file: str,
+def make_noise_ts(confounds_file: Path,
                   confounds_columns: list,
                   demean: bool = False,
                   linear_trend: bool = False,
@@ -232,7 +232,7 @@ def make_noise_ts(confounds_file: str,
         select_columns.update(volterra_columns)
     if spike_threshold:
         select_columns.add(fd)
-    nuisance = pd.read_csv(confounds_file, sep="," if confounds_file.endswith(".csv") else "\t").loc[:,list(select_columns)]
+    nuisance = pd.read_csv(confounds_file, sep="," if str(confounds_file).endswith(".csv") else "\t").loc[:,list(select_columns)]
     if fd in select_columns:
         nuisance.loc[0, fd] = 0
 
