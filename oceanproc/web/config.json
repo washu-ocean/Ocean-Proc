@@ -1,7 +1,0 @@
-{
-	"options_script_path": "../ocean_proc.py",
-	"parser_group_names": [
-		"session_arguments",
-		"config_arguments"
-	]
-}

@@ -1,4 +1,0 @@
-- [ ] Add a file explorer for all of the path-related options
-- [ ] Implement the POST request to begin an oceanproc instance with the formdata
-- [ ] Style everything better
-- [ ] Add method of tracking current oceanproc instances through the web frontend, brainstorm ways to do this
