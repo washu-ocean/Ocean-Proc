@@ -613,8 +613,7 @@ def autogenerate_mask(mask_files: list[Path], output_path: Path) -> Path:
     return output_path
 
 
-def main():
-
+def get_parser():
     parser = OceanParser(
         prog="oceanfla",
         description="Ocean Labs first level analysis",
@@ -738,7 +737,11 @@ def main():
                                   help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
     config_arguments.add_argument("--np_random_seed", type=int, default=42,
                                   help="Set Numpy seed (default is 42)")
+    return (parser, config_arguments)
 
+
+def main():
+    parser, config_arguments = get_parser()
     args = parser.parse_args()
 
     np.random.default_rng(seed=args.np_random_seed)
