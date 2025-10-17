@@ -26,7 +26,7 @@ def make_work_directory(dir_path:Path, subject:str, session:str) -> Path:
     dir_to_make = dir_path / f"sub-{subject}_ses-{session}"
     if dir_to_make.exists():
         want_to_delete = prompt_user_continue(dedent("""
-            A work directory already exists for this subject and session. 
+            A work directory already exists for this subject and session.
             Would you like to delete its contents and start fresh?
             """))
         if want_to_delete:
