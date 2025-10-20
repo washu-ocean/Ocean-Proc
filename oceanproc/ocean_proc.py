@@ -57,11 +57,10 @@ def main():
                               help="The identifier of the subject to preprocess")
     session_args.add_argument("--session", "-se", required=True,
                               help="The identifier of the session to preprocess")
-    dcm2bids_args = session_args.add_mutually_exclusive_group(required=True)
-    dcm2bids_args.add_argument("--source_data", "-sd", type=Path,
-                               help="The path to the directory containing the raw DICOM files for this subject and session")
-    dcm2bids_args.add_argument("--skip_dcm2bids", action="store_true",
-                               help="Flag to indicate that dcm2bids does not need to be run for this subject and session")
+    session_args.add_argument("--source_data", "-sd", type=Path,
+                              help="The path to the directory containing the raw DICOM files for this subject and session")
+    session_args.add_argument("--skip_dcm2bids", action="store_true",
+                              help="Flag to indicate that dcm2bids does not need to be run for this subject and session")
     session_args.add_argument("--usability_file", "-u", type=Path,
                               help="The path to the usability file for this subject and session; this file can be either be an xml or json file. All runs will be used if no file is provided.")
     session_args.add_argument("--longitudinal", "-lg", type=Path, nargs="+", action="append",
@@ -126,7 +125,8 @@ def main():
     try:
         assert args.derivs_path.is_dir(), "Derivatives directory must exist but it cannot be found"
         assert args.bids_path.is_dir(), "Raw Bids directory must exist but it cannot be found"
-        assert args.source_data.is_dir(), "Source data directory must exist but it cannot be found"
+        if not args.skip_dcm2bids:
+            assert args.source_data.is_dir(), "Source data directory must exist but it cannot be found"
         assert args.work_dir.is_dir(), "Work directroy must exist but it cannot be found"
     except AssertionError as e:
         logger.exception(e)
