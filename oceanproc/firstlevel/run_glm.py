@@ -839,6 +839,8 @@ def main():
     model_type = "Mixed" if args.fir and args.hrf else "FIR" if args.fir else "HRF"
     file_map_list = []
 
+    log_stats = "\nRun number\tTotal frames\tFrames cesnored\n"
+
     try:
         # find all preprocessed BOLD runs for this subject and session
         preproc_derivs = args.derivs_dir / args.preproc_subfolder / f"sub-{args.subject}"
@@ -1026,6 +1028,7 @@ def main():
                         fd_mask = fd_arr < args.fd_threshold
                     run_mask &= fd_mask
                 logger.info(f" a total of {np.sum(~run_mask)} timepoints will be censored from this run")
+                log_stats += f"{map_dex+1:02d}\t{run_mask.shape[0]}\t{np.sum(~run_mask)}\n"
                 frame_retention_percent = (np.sum(run_mask) / run_mask.shape[0]) * 100
 
                 # if censoring causes the number of retained frames to be below the run exclusion threshold, drop the run
@@ -1425,6 +1428,7 @@ def main():
             json.dump(dataset_description, f, indent=4)
             logger.info(f"Wrote dataset description to {dataset_description_json.resolve()!s}")
     logger.info("oceanfla complete!")
+    logger.info("\n\n------" + log_stats)
 
 
 if __name__ == "__main__":
