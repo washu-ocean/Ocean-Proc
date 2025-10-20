@@ -57,8 +57,8 @@ def main():
                               help="The identifier of the subject to preprocess")
     session_args.add_argument("--session", "-se", required=True,
                               help="The identifier of the session to preprocess")
-    dcm2bids_args = session_args.add_mutually_exclusive_group()
-    dcm2bids_args.add_argument("--source_data", "-sd", type=Path, required=True,
+    dcm2bids_args = session_args.add_mutually_exclusive_group(required=True)
+    dcm2bids_args.add_argument("--source_data", "-sd", type=Path,
                                help="The path to the directory containing the raw DICOM files for this subject and session")
     dcm2bids_args.add_argument("--skip_dcm2bids", action="store_true",
                                help="Flag to indicate that dcm2bids does not need to be run for this subject and session")
