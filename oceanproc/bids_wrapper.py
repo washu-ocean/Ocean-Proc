@@ -208,6 +208,8 @@ def get_usability_from_file(usability_file:Path):
             exit_program_early("Error parsing the xml file provided. Found none or more than one scan groups")
         scans = scan_element_list[0]
         for s in scans:
+            if s.attrib['type'] == "PhoenixZIPReport":
+                continue
             series_id = int(s.attrib['ID'])
             quality_info = s.find(f"{prefix}quality").text
             quality_pairs[series_id] = quality_info
