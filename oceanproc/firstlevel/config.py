@@ -1,10 +1,15 @@
 # from nipype import logging
 import sys
 import datetime
+from pathlib import Path
+import bids
+
+all_opts = None
 
 class Options():
     _instance = None
     _initialized = False
+    layouts = []
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -14,7 +19,11 @@ class Options():
     def __init__(self, opts=None):
         if not self._initialized and opts:
             for k,v in opts.items():
+                if isinstance(v, bids.BIDSLayout):
+                    self.layouts.append(v)
                 setattr(self, k, v)
+            global all_opts 
+            all_opts = self
             
 # class loggers():
 
@@ -53,6 +62,18 @@ class Options():
 
         
 def set_configs(args):
-
     Options(args) 
     # loggers.initialize()
+
+
+
+def get_layout_for_file(file):
+    if isinstance(file, Path):
+        file = str(file.resolve())
+    elif not isinstance(file, str):
+        raise ValueError(f"argument must be of type Path or str, not {type(file)}")
+
+    for lay in all_opts.layouts:
+        if file.startswith(str(lay._root.resolve())):
+            return lay
+    raise RuntimeError(f"No layout correspond to the input file {file}")

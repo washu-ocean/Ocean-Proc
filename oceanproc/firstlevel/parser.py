@@ -3,12 +3,14 @@ from pathlib import Path
 from ..oceanparse import OceanParser
 import logging
 from ..utils import flags, log_linebreak, export_args_to_file, exit_program_early
+import bids
 
 VERSION = "1.1.4"
 logger = logging.getLogger("parser")
 
 def _build_parser():
 
+    # Build out some useful argument types
     def ExistingPath(path):
         p = Path(path)
         if not p.exists():
@@ -58,6 +60,7 @@ def _build_parser():
         return val
 
 
+    # Create the argument parser
     parser = OceanParser(
         prog="oceanfla",
         description="Ocean Labs first level analysis",
@@ -89,7 +92,7 @@ def _build_parser():
                                   help="The file type of the functional runs to use.")
     config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFile,
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
-    config_arguments.add_argument("--func_space",
+    config_arguments.add_argument("--func_space", default="*",
                                   help="Space that the preprocessed data should be in (for example, 'T2w', 'MNIInfant', etc.)")
     config_arguments.add_argument("--fwhm", type=PositiveValue,
                                   help="FWHM smoothing kernel, in mm (only applies to CIFTI data)")
@@ -171,11 +174,15 @@ def _build_parser():
 
     return (parser, config_arguments)
 
+
+# Function to parse the command line arguments and 
+#   validate them before they become global options
 def parse_args():
 
     parser, config_arguments = _build_parser()
     args = parser.parse_args()
 
+    # don't allow ambiguity when modeling variables two separate ways
     if args.hrf is not None and args.fir is not None:
         if not args.fir_vars or not args.hrf_vars:
             parser.error("Must specify variables to apply each model to if using both types of models")
@@ -189,9 +196,9 @@ def parse_args():
     if args.bold_file_type[0] != ".":
         args.bold_file_type = "." + args.bold_file_type
     if args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz":
-        imagetype = "nifti"
+        args.imagetype = "nifti"
     else:
-        imagetype = "cifti"
+        args.imagetype = "cifti"
 
     if args.parcellate:
         if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
@@ -204,6 +211,17 @@ def parse_args():
 
     if callable(args.events_long):
         args.events_long = args.events_long(args)
+
+    # Add bids layouts for both bids directories
+    args.preproc_bids = args.derivs_dir / args.preproc_subfolder
+    if not args.preproc_bids.exists():
+        parser.error(f"The preprocessed outputs directory does not exist at path: {args.preproc_dir}")
+    
+    args.raw_layout = bids.BIDSLayout(args.raw_bids)
+    args.raw_layout.save(args.raw_bids / ".bids_indexer")
+    args.preproc_layout = bids.BIDSLayout(args.preproc_bids)
+    args.preproc_layout.save(args.preproc_bids / ".bids_indexer")
+
 
     # try:
     #     assert args.derivs_dir.is_dir(), "Derivatives directory must exist but is not found"

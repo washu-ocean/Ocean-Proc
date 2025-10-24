@@ -19,9 +19,9 @@ class DesignMatInputSpec(BaseInterfaceInputSpec):
                         desc="A 2-element list, where hrf[0] denotes the time to the peak of an HRF, and hrf[1] denotes the duration of its 'undershoot' after the peak."), 
         traits.File(exists=True), 
         None, default_value=None)
-    fir_list = traits.List(trait=traits.Str, 
+    fir_vars = traits.List(trait=traits.Str, 
                         desc="A list of column names denoting which columns should have an FIR filter applied.")
-    hrf_list = traits.List(trait=traits.Str, 
+    hrf_vars = traits.List(trait=traits.Str, 
                         desc="A list of column names denoting which columns should be convolved with the HRF function defined in the hrf list.")
     unmodeled = traits.List(trait=traits.Str, 
                         desc="A list of column names denoting which columns should not be modeled by neither hrf or fir, but still included in the design matrix.")
@@ -47,29 +47,29 @@ class DesignMat(BaseInterface):
         events_matrix = events_long.copy()
         hrf = self.inputs.hrf
         fir = self.inputs.fir
-        hrf_list = self.inputs.hrf_list
-        fir_list = self.inputs.fir_list
+        hrf_vars = self.inputs.hrf_vars
+        fir_vars = self.inputs.fir_vars
         unmodeled = self.inputs.unmodeled
         # If both FIR and HRF are specified, we should have at least one list
         # of columns for one of the categories specified.
-        if (fir and hrf) and not (fir_list or hrf_list):
-            raise RuntimeError("Both FIR and HRF were specified, but you need to specify at least one list of variables (fir_list or hrf_list)")
-        # fir_list and hrf_list must not have overlapping columns
-        if (fir_list and hrf_list) and not set(fir_list).isdisjoint(hrf_list):
+        if (fir and hrf) and not (fir_vars or hrf_vars):
+            raise RuntimeError("Both FIR and HRF were specified, but you need to specify at least one list of variables (fir_vars or hrf_vars)")
+        # fir_vars and hrf_vars must not have overlapping columns
+        if (fir_vars and hrf_vars) and not set(fir_vars).isdisjoint(hrf_vars):
             raise RuntimeError("Both FIR and HRF lists of variables were specified, but they overlap.")
         conditions = [s for s in np.unique(events_matrix.columns)]  # unique trial types
         residual_conditions = [c for c in conditions if c not in unmodeled] if unmodeled else conditions
-        if (fir and hrf) and (bool(fir_list) ^ bool(hrf_list)):  # Create other list if only one is specified
-            if fir_list:
-                hrf_list = [c for c in residual_conditions if c not in fir_list]
-            elif hrf_list:
-                fir_list = [c for c in residual_conditions if c not in hrf_list]
-            assert set(hrf_list).isdisjoint(fir_list)
+        if (fir and hrf) and (bool(fir_vars) ^ bool(hrf_vars)):  # Create other list if only one is specified
+            if fir_vars:
+                hrf_vars = [c for c in residual_conditions if c not in fir_vars]
+            elif hrf_vars:
+                fir_vars = [c for c in residual_conditions if c not in hrf_vars]
+            assert set(hrf_vars).isdisjoint(fir_vars)
 
         if fir:
             fir_conditions = residual_conditions
-            if fir_list and len(fir_list) > 0:
-                fir_conditions = [c for c in residual_conditions if c in fir_list]
+            if fir_vars and len(fir_vars) > 0:
+                fir_conditions = [c for c in residual_conditions if c in fir_vars]
             residual_conditions = [c for c in residual_conditions if c not in fir_conditions]
 
             col_names = {c:c + "_00" for c in fir_conditions}
@@ -84,8 +84,8 @@ class DesignMat(BaseInterface):
             events_matrix = events_matrix.astype(int)
         if hrf:
             hrf_conditions = residual_conditions
-            if hrf_list and len(hrf_list) > 0:
-                hrf_conditions = [c for c in residual_conditions if c in hrf_list]
+            if hrf_vars and len(hrf_vars) > 0:
+                hrf_conditions = [c for c in residual_conditions if c in hrf_vars]
             residual_conditions = [c for c in residual_conditions if c not in hrf_conditions]
             logger.info(events_matrix)
             cfeats = self._hrf_convolve_features(features=events_matrix,
@@ -245,3 +245,23 @@ class DesignMat(BaseInterface):
         undershoot = gamma.pdf(time, undershoot_dur)
         hrf_timeseries = peak - 0.35 * undershoot
         return hrf_timeseries
+    
+
+def group_runs(bolds:list, confounds:list, events:list):
+    from config import get_layout_for_file
+    run_dict = dict()
+    for ftype, file_list in {"bold":bolds, "confounds":confounds, "events":events}.items():
+        for file in file_list:
+            layout = get_layout_for_file(file)
+            bfile = layout.get_file(file)
+            run = int(bfile.entities["run"])
+            if run in run_dict:
+                run_dict[run][ftype] = bfile
+            else:
+                run_dict[run] = {ftype: bfile}
+            
+    return [v for k,v in sorted(run_dict.items(), key=lambda x: x[1])]
+        
+
+
+# def get_number_of_volumes(bold_in:str|Path, brain_mask:str|Path):
