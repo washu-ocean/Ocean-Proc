@@ -6,26 +6,59 @@ from nipype import logging
 from textwrap import dedent
 from nipype.utils.filemanip import split_filename
 from scipy.stats import gamma
+from bids.layout.utils import PaddedInt
+import bids
+from . import utilities
 
 # events_to_design
 logger = logging.getLogger("nipype.interface")
 
+
+# class ExtractRunFilesInputSpec(BaseInterfaceInputSpec):
+#     run_files = traits.Dict(key_trait=traits.Str, has_items=True)
+
+# class ExtractRunFilesOutputSpec(TraitedSpec)
+
+
+
 class DesignMatInputSpec(BaseInterfaceInputSpec):
-    in_file = File(exists=True, mandatory=True, 
+    event_file = File(exists=True, mandatory=True, 
                         desc="A BIDS style events file of type .tsv")
-    fir = traits.Int(desc="An integer denoting the order of an FIR filter")
-    hrf = traits.Either(
+    
+    # bold_file = File(exists=True,)
+    
+    fir = traits.Union(
+        traits.Int(desc="An integer denoting the order of an FIR filter", mandatory=False, allow_none=True),
+        None,
+        default_value=None)
+    
+    hrf = traits.Union(
         traits.List(trait=traits.Int, minlen=2, maxlen=2,
                         desc="A 2-element list, where hrf[0] denotes the time to the peak of an HRF, and hrf[1] denotes the duration of its 'undershoot' after the peak."), 
-        traits.File(exists=True), 
-        None, default_value=None)
-    fir_vars = traits.List(trait=traits.Str, 
-                        desc="A list of column names denoting which columns should have an FIR filter applied.")
-    hrf_vars = traits.List(trait=traits.Str, 
-                        desc="A list of column names denoting which columns should be convolved with the HRF function defined in the hrf list.")
-    unmodeled = traits.List(trait=traits.Str, 
-                        desc="A list of column names denoting which columns should not be modeled by neither hrf or fir, but still included in the design matrix.")
+        traits.File(exists=True),
+        None, 
+        default_value=None)
+    
+    fir_vars = traits.Union(
+        traits.List(trait=traits.Str, 
+                        desc="A list of column names denoting which columns should have an FIR filter applied."),
+        None,
+        default_value=None)
+    
+    hrf_vars = traits.Union(
+        traits.List(trait=traits.Str, 
+                        desc="A list of column names denoting which columns should be convolved with the HRF function defined in the hrf list."),
+        None,
+        default_value=None)
+    
+    unmodeled = traits.Union(
+        traits.List(trait=traits.Str, 
+                        desc="A list of column names denoting which columns should not be modeled by neither hrf or fir, but still included in the design matrix."),
+        None,
+        default_value=None)
+    
     volumes = traits.Int(desc="The number of volumes that are in the corresponding BOLD run")
+
     tr = traits.Float(desc="The Repetition Time for this BOLD run")
     
 
@@ -40,7 +73,7 @@ class DesignMat(BaseInterface):
     
     def _run_interface(self, runtime):
         events_long = self._make_events_long(
-            event_file=self.inputs.in_file,
+            event_file=self.inputs.event_file,
             volumes=self.inputs.volumes,
             tr=self.inputs.tr)
         
@@ -247,21 +280,50 @@ class DesignMat(BaseInterface):
         return hrf_timeseries
     
 
-def group_runs(bolds:list, confounds:list, events:list):
-    from config import get_layout_for_file
-    run_dict = dict()
-    for ftype, file_list in {"bold":bolds, "confounds":confounds, "events":events}.items():
+def extract_run_group(bold_list:list, confounds_list:list, events_list:list, run_needed:PaddedInt):
+    from oceanproc.firstlevel.config import get_layout_for_file
+    run_dict = {
+        "bold":None,
+        "confounds":None,
+        "events":None
+    }
+    for ftype, file_list in {"bold":bold_list, "confounds":confounds_list, "events":events_list}.items():
         for file in file_list:
             layout = get_layout_for_file(file)
-            bfile = layout.get_file(file)
-            run = int(bfile.entities["run"])
-            if run in run_dict:
-                run_dict[run][ftype] = bfile
-            else:
-                run_dict[run] = {ftype: bfile}
+            bids_file = layout.get_file(file)
+            run = int(bids_file.entities["run"]) if "run" in bids_file.entities else 1
+            if run == int(run_needed):
+                run_dict[ftype] = bids_file
+                break
+    
+    if not all(list(run_dict.values())):
+        raise RuntimeError(f"Could not find all the needed files for run-{run_needed}")
+    
+    return run_dict["bold"], run_dict["confounds"], run_dict["events"]
+    
+
+def get_number_of_volumes(bold_in:bids.layout.BIDSFile, brain_mask:str|Path = None):
+    func_data = utilities.load_data(func_file=bold_in, 
+                                    brain_mask=brain_mask)
+    return func_data.shape[0]
+
+# def group_runs(bolds:list, confounds:list, events:list):
+#     from oceanproc.firstlevel.config import get_layout_for_file
+#     run_dict = dict()
+#     for ftype, file_list in {"bold":bolds, "confounds":confounds, "events":events}.items():
+#         for file in file_list:
+#             layout = get_layout_for_file(file)
+#             bfile = layout.get_file(file)
+#             run = int(bfile.entities["run"]) if "run" in bfile.entities else 1
+#             if run in run_dict:
+#                 run_dict[run][ftype] = bfile
+#             else:
+#                 run_dict[run] = {ftype: bfile}
             
-    return [v for k,v in sorted(run_dict.items(), key=lambda x: x[1])]
+#     return [v for k,v in sorted(run_dict.items(), key=lambda x: x[1])]
         
 
+# def extract_run_files(run_dict:dict):
+#     return 
 
-# def get_number_of_volumes(bold_in:str|Path, brain_mask:str|Path):
+
