@@ -34,7 +34,7 @@ dependencies = [
     "torchvision<1.0.0,>=0.20.1",
     "torchaudio<3.0.0,>=2.5.1",
     "pybids>=0.16.3",
-    "nipype"
+    "nipype",
     "niworkflows"
 ]
 name = "oceanproc"
