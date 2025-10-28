@@ -1028,7 +1028,7 @@ def main():
                         fd_mask = fd_arr < args.fd_threshold
                     run_mask &= fd_mask
                 logger.info(f" a total of {np.sum(~run_mask)} timepoints will be censored from this run")
-                log_stats += f"{map_dex+1:02d}\t{run_mask.shape[0]}\t{np.sum(~run_mask)}\n"
+                log_stats += f"{run_num:02d}\t{run_mask.shape[0]}\t{np.sum(~run_mask)}\n"
                 frame_retention_percent = (np.sum(run_mask) / run_mask.shape[0]) * 100
 
                 # if censoring causes the number of retained frames to be below the run exclusion threshold, drop the run
