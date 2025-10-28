@@ -23,7 +23,7 @@ from pathlib import Path
 def generate_nuisance_matrix(confounds_file: str,
                              confounds_columns: list,
                              output_path: str | Path,
-                             include_trend: bool = False,
+                             include_trend: bool = True,
                              fd_threshold: float = None,
                              volterra_expansion: int = None,
                              volterra_columns: list = None,):
@@ -83,10 +83,10 @@ class _GenerateNuisanceMatrixInputSpec(BaseInterfaceInputSpec):
         0.9,
         desc="The framewise displacement threshold used when censoring high-motion frames"
     )
-    is_long = traits.Bool(
-        False,
-        default=False, desc="Whether the events file is already long-formatted."
-    )
+    # is_long = traits.Bool(
+    #     False,
+    #     default=False, desc="Whether the events file is already long-formatted."
+    # )
     include_trend = traits.Bool(
         False,
         desc="Whether or not to include linear trend in teh nuisance matrix."

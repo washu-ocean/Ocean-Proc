@@ -4,6 +4,7 @@ from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface
 from niworkflows.utils.bids import collect_participants
 from . import operations
+from .interfaces import nuisance, filter
 from nipype import config as ncfg
 from pathlib import Path
 # from .config import Options
@@ -179,15 +180,19 @@ def build_func_space_wf(func_space:str, run_list:list[PaddedInt], file_extension
 
         # Define a node to extract the run-specific files from the data-grabbers
         extract_run_group_node = Node(
-            Function(
-                function=operations.extract_run_group,
-                input_names=["bold_list", "confounds_list", "events_list", "run_needed"],
-                output_names=["bold_file",
-                            "confounds_file",
-                            "events_file"]
-            ),
+            operations.ExtractRunGroup,
             name="extract_run_group_node"
         )
+        # extract_run_group_node = Node( operations.ExtractRunGroup
+        #     Function(
+        #         function=operations.extract_run_group,
+        #         input_names=["bold_list", "confounds_list", "events_list", "run_needed"],
+        #         output_names=["bold_file",
+        #                     "confounds_file",
+        #                     "events_file"]
+        #     ),
+        #     name="extract_run_group_node"
+        # )
         extract_run_group_node.inputs.run_needed = run
         
         # Connect the files to the run-level workflow
@@ -243,11 +248,7 @@ def build_run_workflow(run):
     )
 
     get_volumes_node = Node(
-        Function(
-            input_names=["bids_file", "brain_mask"],
-            output_names=["volumes"],
-            function=operations.get_number_of_volumes
-        ),
+        operations.GetVolumeCount,
         name="get_run_volumes_node"
     )
     get_volumes_node.inputs.brain_mask = all_opts.brain_mask
@@ -263,12 +264,21 @@ def build_run_workflow(run):
         name="design_mat_node"
     )
 
+    # nuisance_mat_node = Node(
+    #     nuisance.GenerateNuisanceMatrix(
+    #         confounds_columns = all_opts.confounds,
+    #         do_volterra_expansion = False,
+    #         fd_censoring = all_opts.fd_censoring,
+    #         include_trend = True, 
+    #     )
+    # )
+
     workflow.connect([
         (inputnode, extract_tr_node, [
             ("bold_file", "bids_file")
         ]),
         (inputnode, get_volumes_node, [
-            ("bold_file", "bids_file")
+            ("bold_file", "bold_in")
         ]), 
         (extract_tr_node, design_mat_node, [
             ("tr", "tr")

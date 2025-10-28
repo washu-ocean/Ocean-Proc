@@ -2,13 +2,11 @@ from nipype.interfaces.base import BaseInterface, BaseInterfaceInputSpec, traits
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from nipype import logging
+from nipype import logging, Function
 from textwrap import dedent
 from nipype.utils.filemanip import split_filename
 from scipy.stats import gamma
-from bids.layout.utils import PaddedInt
-import bids
-from . import utilities
+
 
 # events_to_design
 logger = logging.getLogger("nipype.interface")
@@ -136,13 +134,13 @@ class DesignMat(BaseInterface):
                             and were also not selected to be left unmodeled. These variables will not be included in the design matrix:\n\t {residual_conditions}"""))
             events_matrix = events_matrix.drop(columns=residual_conditions)
 
-        events_matrix.to_csv(split_filename(self.inputs.in_file)[1] + "_events-matrix.csv", index=False)
+        events_matrix.to_csv(split_filename(self.inputs.event_file)[1] + "_events-matrix.csv", index=False)
         return runtime
     
     def _list_outputs(self):
         outputs = self._outputs().get()
-        in_file = self.inputs.in_file
-        outputs["out_file"] = Path(split_filename(in_file)[1] + "_events-matrix.csv").resolve()
+        event_file = self.inputs.event_file
+        outputs["out_file"] = Path(split_filename(event_file)[1] + "_events-matrix.csv").resolve()
         return outputs
         
 
@@ -280,7 +278,7 @@ class DesignMat(BaseInterface):
         return hrf_timeseries
     
 
-def extract_run_group(bold_list:list, confounds_list:list, events_list:list, run_needed:PaddedInt):
+def _extract_run_group(bold_list:list, confounds_list:list, events_list:list, run_needed):
     from oceanproc.firstlevel.config import get_layout_for_file
     run_dict = {
         "bold":None,
@@ -300,12 +298,26 @@ def extract_run_group(bold_list:list, confounds_list:list, events_list:list, run
         raise RuntimeError(f"Could not find all the needed files for run-{run_needed}")
     
     return run_dict["bold"], run_dict["confounds"], run_dict["events"]
-    
 
-def get_number_of_volumes(bold_in:bids.layout.BIDSFile, brain_mask:str|Path = None):
-    func_data = utilities.load_data(func_file=bold_in, 
+ExtractRunGroup = Function(
+    function=_extract_run_group,
+    input_names=["bold_list", "confounds_list", "events_list", "run_needed"],
+    output_names=["bold_file",
+                "confounds_file",
+                "events_file"]
+)
+
+def get_number_of_volumes(bold_in, brain_mask = None):
+    from oceanproc.firstlevel.utilities import load_data
+    func_data = load_data(func_file=bold_in, 
                                     brain_mask=brain_mask)
     return func_data.shape[0]
+
+GetVolumeCount = Function(
+    function=get_number_of_volumes,
+    input_names=["bold_in", "brain_mask"],
+    output_names=["volumes"]
+)
 
 # def group_runs(bolds:list, confounds:list, events:list):
 #     from oceanproc.firstlevel.config import get_layout_for_file
