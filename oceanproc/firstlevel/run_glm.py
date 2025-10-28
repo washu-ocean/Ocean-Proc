@@ -938,7 +938,7 @@ def main():
             logger.info("loading in BOLD data")
             run_file_base = file_name_base
             run_info = len(str(run_map['bold']).split('run-')) > 1
-            run_num = int(re.search(r'_run-(\d+)', run_map['bold'].name).group(1))
+            run_num = map_dex + 1
             if run_info:
                 run_num = int(run_map['bold'].name.split('run-')[-1].split('_')[0])
                 run_file_base = f"{file_name_base}_run-{run_num:02d}"
