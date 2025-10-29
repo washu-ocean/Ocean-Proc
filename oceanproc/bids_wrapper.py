@@ -44,7 +44,7 @@ def remove_unusable_runs(bids_path:Path, subject:str, session:str):
     bids_layout = BIDSLayout(bids_path, validate=False)
     data_files = bids_layout.get(subject=subject, session=session, extension="nii.gz", datatype=".*", regex_search=True)
     if len(data_files) == 0:
-            exit_program_early("Could not find any data files in the bids directory.")
+        exit_program_early("Could not find any data files in the bids directory.")
 
     files_to_delete = set()
     no_usability_info = set()
@@ -68,7 +68,6 @@ def remove_unusable_runs(bids_path:Path, subject:str, session:str):
         logger.warning("The following files contained no usability information and will be retained: ")
         for file in sorted(no_usability_info, key=lambda x: x.path):
             logger.info(f"\tfile: {file.path}")
-
 
 
 @debug_logging
@@ -222,13 +221,14 @@ def get_usability_from_file(usability_file:Path):
     logger.info("scan quality information: ")
     for series_id, quality_info in quality_pairs.items():
         logger.info(f"\tSeries: {series_id} -> {quality_info}")
-    
+
     return quality_pairs
 
+
 @debug_logging
-def add_information_to_sidecar(nifti_dir:Path, 
-                             usability_file:Path = None, 
-                             session_number:int = 0):
+def add_information_to_sidecar(nifti_dir:Path,
+                               usability_file:Path = None,
+                               session_number:int = 0):
     logger.info("####### Adding usability and localizer block number to sidecar files #######\n")
     session_jsons = sorted(nifti_dir.glob("*.json"))
     localizer_series = list()
@@ -237,7 +237,7 @@ def add_information_to_sidecar(nifti_dir:Path,
             jd = json.load(f)
             if "localizer" in str(jd["SeriesDescription"]).lower():
                 localizer_series.append(jd["SeriesNumber"])
-    
+
     localizer_series.sort()
     quality_pairs = get_usability_from_file(usability_file=usability_file) if usability_file else False
     for sidecar in session_jsons:
@@ -366,9 +366,9 @@ def dicom_to_bids(subject:str,
     else:
         nifti_path = source_dir
 
-    add_information_to_sidecar(nifti_dir=nifti_path, 
-                             usability_file=usability_file,
-                             session_number=session_index)
+    add_information_to_sidecar(nifti_dir=nifti_path,
+                               usability_file=usability_file,
+                               session_number=session_index)
 
     run_dcm2bids(subject=subject,
                  session=session,
