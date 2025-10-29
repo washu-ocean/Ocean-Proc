@@ -1,4 +1,10 @@
 import pytest
+from pathlib import Path
+
+
+@pytest.fixture(scope="session")
+def confounds_filepath():
+    return Path(__file__).parent / "data" / "confounds.tsv"
 
 
 @pytest.fixture(scope="session")
@@ -18,7 +24,6 @@ def nifti_timeseries_path(tmp_path_factory):
     nifti_path = tmp_path_factory.mktemp("data") / "mock_nifti.nii.gz"
     nib.save(nifti_img, nifti_path)
     return nifti_path
-
 
 @pytest.fixture(scope="session")
 def tmask_path(nifti_timeseries_path):
