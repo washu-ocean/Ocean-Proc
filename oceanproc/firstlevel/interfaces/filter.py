@@ -76,7 +76,7 @@ class _FilterDataInputSpec(BaseInterfaceInputSpec):
         desc="Run mask (as a .txt)."
     )
     out_file = File(
-        exists=False,
+        mandatory=True,
         desc="Path to filtered timeseries to create."
     )
     padtype = traits.Str(
