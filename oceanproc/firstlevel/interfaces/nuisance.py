@@ -83,7 +83,7 @@ class _GenerateNuisanceMatrixInputSpec(BaseInterfaceInputSpec):
         desc="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM."
     )
     spike_threshold = traits.Union(
-        traits.Str(), None, default=None,
+        traits.Str(), None, default_value=None,
         desc="The framewise displacement threshold used when censoring high-motion frames"
     )
     linear_trend = traits.Bool(
@@ -110,7 +110,7 @@ of neighbors will be masked.
         desc="Variables to apply volterra expansion to (must be in confound_columns)"
     )
     volterra_lag = traits.Union(
-        traits.Int(), None, default=None,
+        traits.Int(), None, default_value=None,
         desc="Amount of frames to lag for Volterra expansion."
     )
 
