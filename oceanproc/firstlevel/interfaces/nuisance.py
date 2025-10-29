@@ -23,12 +23,13 @@ from pathlib import Path
 def generate_nuisance_matrix(confounds_file: str,
                              confounds_columns: list,
                              output_path: str | Path,
-                             include_trend: bool = True,
-                             fd_threshold: float = None,
-                             volterra_expansion: int = None,
+                             demean: bool = False,
+                             linear_trend: bool = False,
+                             spike_threshold: float = None,
+                             volterra_lag: int = None,
                              volterra_columns: list = None,):
     confounds_columns = set(confounds_columns)
-    if fd_threshold:
+    if spike_threshold:
         confounds_columns.add("framewise_displacement")
     if volterra_columns:
         confounds_columns.update(volterra_columns)
@@ -41,18 +42,20 @@ def generate_nuisance_matrix(confounds_file: str,
         raise ValueError("Invalid suffix (must be .csv or .tsv)")
     if "framewise_displacement" in confounds_columns:
         nuisance.loc[0, "framewise_displacement"] = 0
-        if fd_threshold:
+        if spike_threshold:
             b = 0
             for a in range(len(nuisance)):
-                if nuisance.loc[a, "framewise_displacement"] > fd_threshold:
+                if nuisance.loc[a, "framewise_displacement"] > spike_threshold:
                     nuisance[f"spike{b}"] = 0
                     nuisance.loc[a, f"spike{b}"] = 1
                     b += 1
-    if include_trend:
+    if demean:
+        nuisance["mean"] = 1
+    if linear_trend:
         nuisance["trend"] = np.arange(0, len(nuisance))
-    if volterra_columns and volterra_expansion:
+    if volterra_columns and volterra_lag:
         for vc in volterra_columns:
-            for lag in range(volterra_expansion):
+            for lag in range(volterra_lag):
                 nuisance.loc[:, f"{vc}_{lag + 1}"] = nuisance.loc[:, vc].shift(lag + 1)
         nuisance.fillna(0, inplace=True)
 
@@ -72,24 +75,20 @@ class _GenerateNuisanceMatrixInputSpec(BaseInterfaceInputSpec):
     confounds_columns = traits.List(
         desc="Variables to use in nuisance regression before final GLM."
     )
-    do_volterra_expansion = traits.Bool(
-        False,
+    demean = traits.Bool(
+        False
     )
     fd_censoring = traits.Bool(
         False,
         desc="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM."
     )
-    fd_threshold = traits.Float(
-        0.9,
+    spike_threshold = traits.Union(
+        traits.Str(), None, default=None,
         desc="The framewise displacement threshold used when censoring high-motion frames"
     )
-    # is_long = traits.Bool(
-    #     False,
-    #     default=False, desc="Whether the events file is already long-formatted."
-    # )
-    include_trend = traits.Bool(
+    linear_trend = traits.Bool(
         False,
-        desc="Whether or not to include linear trend in teh nuisance matrix."
+        desc="Whether or not to include linear trend in the nuisance matrix."
     )
     minimum_unmasked_neighbors = traits.Int(
         0,
@@ -110,6 +109,10 @@ of neighbors will be masked.
     volterra_columns = traits.List(
         desc="Variables to apply volterra expansion to (must be in confound_columns)"
     )
+    volterra_lag = traits.Union(
+        traits.Int(), None, default=None,
+        desc="Amount of frames to lag for Volterra expansion."
+    )
 
 
 class _GenerateNuisanceMatrixOutputSpec(TraitedSpec):
@@ -128,8 +131,17 @@ class GenerateNuisanceMatrix(SimpleInterface):
     output_spec = _GenerateNuisanceMatrixOutputSpec
 
     def _run_interface(self, runtime):
-        self._results['out_nuisance_matrix'] = generate_nuisance_matrix(
-            self.inputs.in_file,
-            self.inputs.confounds_columns,
-            self.inputs.out_file
+        generate_nuisance_matrix(
+            confounds_file=self.inputs.in_file,
+            confounds_columns=self.inputs.confounds_columns,
+            output_path=self.inputs.out_file,
+            demean=self.inputs.demean,
+            linear_trend=self.inputs.linear_trend,
+            spike_threshold=self.inputs.spike_threshold,
+            volterra_lag=self.inputs.volterra_lag,
+            volterra_columns=self.inputs.volterra_columns
         )
+        return runtime
+
+    def _list_outputs(self):
+        return {'out_nuisance_matrix': self.inputs.out_file}

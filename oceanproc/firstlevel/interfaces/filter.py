@@ -129,11 +129,13 @@ class FilterData(SimpleInterface):
                                          header=img.header,
                                          nifti_header=img.nifti_header)
             nib.save(filtered_img, self.inputs.out_file)
-            self._results['out_file'] = self.inputs.out_file
         elif suffix == ".nii.gz":  # reshape back to 4d
             filtered_fdata = np.reshape(filtered_fdata.T, orig_shape)
             filtered_img = img.__class__(filtered_fdata, header=img.header)
             nib.save(filtered_img, self.inputs.out_file)
-            self._results['out_file'] = self.inputs.out_file
         else:
             raise RuntimeError("Unexpected data type for functional data")
+        return runtime
+
+    def _list_outputs(self):
+        return {'out_file': self.inputs.out_file}
