@@ -982,8 +982,10 @@ def main():
             noise_df = make_noise_ts(
                 confounds_file=run_map["confounds"],
                 confounds_columns=args.confounds,
-                demean=(args.highpass is not None or args.lowpass is not None or "mean" in args.nuisance_regression),
-                linear_trend=(args.highpass is not None or args.lowpass is not None or "trend" in args.nuisance_regression),
+                # demean=(args.highpass is not None or args.lowpass is not None or "mean" in args.nuisance_regression),
+                # linear_trend=(args.highpass is not None or args.lowpass is not None or "trend" in args.nuisance_regression),
+                demean=(not args.detrend),
+                linear_trend=(not args.detrend),
                 spike_threshold=args.fd_threshold if args.spike_regression else None,
                 volterra_expansion=args.volterra_lag,
                 volterra_columns=args.volterra_columns
