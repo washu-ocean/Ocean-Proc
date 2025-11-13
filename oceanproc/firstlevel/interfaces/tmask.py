@@ -11,6 +11,7 @@ from nipype.interfaces.base import (
 import numpy as np
 import numpy.typing as npt
 import nibabel as nib
+from nipype.utils.filemanip import split_filename, fname_presuffix
 
 
 def make_tmask(in_file: Path | str,
@@ -32,7 +33,7 @@ def make_tmask(in_file: Path | str,
         df = pd.read_csv(in_file, sep="\t")
     else:
         raise RuntimeError("The 'in_file' argument of make_tmask() must end in .csv or .tsv.")
-    fd_arr = df["framewise_displacement"].to_numpy()
+    fd_arr = df.loc[:, "framewise_displacement"].to_numpy()
     if minimum_unmasked_neighbors > 0:
         fd_arr_padded = np.pad(fd_arr, pad_width := minimum_unmasked_neighbors)
         fd_mask = np.full(len(fd_arr_padded), False)
@@ -49,20 +50,20 @@ def make_tmask(in_file: Path | str,
     else:
         fd_mask = fd_arr < fd_threshold
     fd_mask[:start_censoring] = False
-    print(fd_mask)
+    # print(fd_mask)
     np.savetxt(out_file, fd_mask)
 
 
 class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
-    in_file = File(
+    confounds_file = File(
         exists=True,
         mandatory=True,
         desc="Path to nuisance matrix (as a .csv or .tsv)"
     )
-    out_file = File(
-        mandatory=True,
-        desc="Path to tmask (a .txt file)"
-    )
+    # out_file = File(
+    #     mandatory=True,
+    #     desc="Path to tmask (a .txt file)"
+    # )
     fd_threshold = traits.Float(
         mandatory=True,
         desc="FD threshold for masking frames."
@@ -92,14 +93,17 @@ class MakeTmask(SimpleInterface):
     output_spec = _MakeTmaskOutputSpec
 
     def _run_interface(self, runtime):
+        output_file = fname_presuffix(self.inputs.in_file, 
+                                      suffix=f"_tmask-{str(self.inputs.fd_threshold).replace('.', 'p')}.txt", 
+                                      newpath=runtime.cwd)
         make_tmask(
-            in_file=self.inputs.in_file,
-            out_file=self.inputs.out_file,
+            in_file=self.inputs.confounds_file,
+            out_file=output_file,
             fd_threshold=self.inputs.fd_threshold,
             minimum_unmasked_neighbors=self.inputs.minimum_unmasked_neighbors,
             start_censoring=self.inputs.start_censoring,
         )
-        self._results["out_file"] = self.inputs.out_file
+        self._results["out_file"] = output_file
         return runtime
 
     # def _list_outputs(self):

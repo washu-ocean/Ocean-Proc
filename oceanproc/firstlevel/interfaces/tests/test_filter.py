@@ -1,4 +1,4 @@
-from ..filter import FilterData
+from ..clean import FilterData
 
 
 def test_FilterData_with_nifti(nifti_timeseries_path, tmask_path):

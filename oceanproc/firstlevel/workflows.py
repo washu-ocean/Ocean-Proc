@@ -3,8 +3,11 @@ from nipype.pipeline.engine import Node as eNode
 from nipype.interfaces.io import BIDSDataGrabber 
 from nipype.interfaces.utility import IdentityInterface
 from niworkflows.utils.bids import collect_participants
+from niworkflows.interfaces.bids import DerivativesDataSink
+from oceanproc.firstlevel.interfaces.nuisance import GenerateNuisanceMatrix
+from oceanproc.firstlevel.interfaces.tmask import MakeTmask
 from . import operations
-from .interfaces import nuisance, filter
+from .interfaces import *
 from nipype import config as ncfg
 from pathlib import Path
 # from .config import Options
@@ -13,6 +16,7 @@ from bids.layout.utils import PaddedInt
 from .config import all_opts
 from . import utilities
 from bids.utils import listify
+
 
 
 
@@ -237,6 +241,19 @@ def build_run_workflow(run):
         name = "inputnode"
     )
 
+    outputnode = Node(
+        IdentityInterface(
+            fields=[
+                "cleaned_bold",
+                "design_matrix",
+                "nuisance_matrix",
+                "tmask",
+            ]
+        ),
+        name = "outputnode"
+    )
+
+
     tr_extract_func = lambda bids_file: bids_file.entities["RepetitionTime"]
     extract_tr_node = Node(
         Function(
@@ -253,25 +270,36 @@ def build_run_workflow(run):
     )
     get_volumes_node.inputs.brain_mask = all_opts.brain_mask
 
-    design_mat_node = Node(
-        operations.DesignMat(
+    events_matrix_node = Node(
+        operations.EventsMatrix(
             fir = all_opts.fir,
             hrf = all_opts.hrf,
             fir_vars = all_opts.fir_vars,
             hrf_vars = all_opts.hrf_vars,
             unmodeled = all_opts.unmodeled,
         ),
-        name="design_mat_node"
+        name="events_matix_node"
     )
 
-    # nuisance_mat_node = Node(
-    #     nuisance.GenerateNuisanceMatrix(
-    #         confounds_columns = all_opts.confounds,
-    #         do_volterra_expansion = False,
-    #         fd_censoring = all_opts.fd_censoring,
-    #         include_trend = True, 
-    #     )
-    # )
+    nuisance_mat_node = Node(
+        GenerateNuisanceMatrix(
+            confounds_columns = all_opts.confounds,
+            demean = True, # not all_opts.exclude_run_mean
+            linear_trend = True, # not all_opts.exclude_run_trend
+            spike_threshold = all_opts.fd_threshold if all_opts.spike_regression else None,
+            volterra_lag = all_opts.volterra_lag,
+            volterra_columns = all_opts.volterra_columns,
+        )
+    )
+
+    tmask_node = Node(
+        MakeTmask(
+            fd_threshold = all_opts.fd_threshold,
+            minimum_unmasked_neighbors = all_opts.minimum_unmasked_neighbors,
+            start_censoring = all_opts.start_censoring
+        ),
+        name="make_tmask_node"
+    )
 
     workflow.connect([
         (inputnode, extract_tr_node, [
@@ -280,16 +308,36 @@ def build_run_workflow(run):
         (inputnode, get_volumes_node, [
             ("bold_file", "bold_in")
         ]), 
-        (extract_tr_node, design_mat_node, [
+        (extract_tr_node, events_matrix_node, [
             ("tr", "tr")
         ]),
-        (get_volumes_node, design_mat_node, [
+        (get_volumes_node, events_matrix_node, [
             ("volumes", "volumes")
         ]),
-        (inputnode, design_mat_node, [
+        (inputnode, events_matrix_node, [
             ("events_file", "event_file")
+        ]),
+        (inputnode, nuisance_mat_node, [
+            ("confounds_file", "confounds_file")
+        ]),
+        (inputnode, tmask_node, [
+            ("confounds_file", "confounds_file")
         ])
     ])
+
+
+    if all_opts.highpass or all_opts.lowpass:
+        if "mean" not in all_opts.nuisance_regression:
+            # logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
+            all_opts.nuisance_regression.append("mean")
+        if "trend" not in all_opts.nuisance_regression:
+            # logger.warning("High-, low-, or band-pass specified, but trend not specified as nuisance regressor -- adding this in automatically")
+            all_opts.nuisance_regression.append("trend")
+    
+    if all_opts.nuisance_regression:
+        pass
+
+
 
     return workflow
 
