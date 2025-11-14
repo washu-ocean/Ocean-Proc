@@ -93,9 +93,16 @@ class MakeTmask(SimpleInterface):
     output_spec = _MakeTmaskOutputSpec
 
     def _run_interface(self, runtime):
-        output_file = fname_presuffix(self.inputs.in_file, 
-                                      suffix=f"_tmask-{str(self.inputs.fd_threshold).replace('.', 'p')}.txt", 
-                                      newpath=runtime.cwd)
+        from ..utilities import replace_entities
+
+        output_file = replace_entities(
+            file=self.inputs.confounds_file, 
+            entities={
+                "desc": f"{str(self.inputs.fd_threshold).replace('.', 'p')}mm", 
+                "suffix": "tmask", 
+                "ext": ".txt",
+                "path": None
+        })
         make_tmask(
             in_file=self.inputs.confounds_file,
             out_file=output_file,

@@ -5,6 +5,7 @@
 from nipype import config as ncfg
 # from pathlib import Path
 from .parser import parse_args
+from bids.utils import listify
 # import bids
 # from bids.layout.utils import PaddedInt
 
@@ -51,7 +52,7 @@ def main():
     from .workflows import build_oceanfla_wf
     
     oceanfla_wf = build_oceanfla_wf(
-        task=all_opts.task,
+        task=listify(all_opts.task),
         subjects=all_opts.subject,
         base_dir=work_dir
     )

@@ -5,6 +5,7 @@ import numpy as np
 import bids
 from bids.layout.utils import PaddedInt
 from bids.layout import parse_file_entities
+from nipype.utils.filemanip import split_filename
 # from bids.layout.writing import build_path
 
 cifti_files = [
@@ -16,18 +17,22 @@ cifti_files = [
 
 
 # Grab BOLD files from the preprocessed outputs, and list the runs and file extension for each 'func_space' in the files. 
-def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, task:str):
-    files = layout.get(subject=subject, session=session, task=task, suffix="bold", datatype="func", extension=[".nii",".nii.gz",".dtseries.nii"])
+def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, tasks:list[str]):
+    files = layout.get(subject=subject, session=session, task=tasks, suffix="bold", datatype="func", extension=[".nii",".nii.gz",".dtseries.nii"])
     space_run_dict = dict()
     for f in files:
         run = f.entities["run"] if "run" in f.entities else PaddedInt('01')
         space = f.entities["space"] if "space" in f.entities else "func"
+        task = f.entities["task"]
         if space in space_run_dict:
-            space_run_dict[space]["runs"].append(run)
+            if task in space_run_dict[space]["runs"]:
+                space_run_dict[space]["runs"][task].append(run)
+            else:
+                space_run_dict[space]["runs"][task] = [run]
         else:
             space_run_dict[space] = {}
             space_run_dict[space]["extension"] = f.entities["extension"]
-            space_run_dict[space]["runs"] = [run]
+            space_run_dict[space]["runs"] = {task:[run]}
     return space_run_dict
 
 
@@ -82,4 +87,34 @@ def create_image_like(data: np.ArrayLike,
     
     data_img = nib.cifti2.cifti2.Cifti2Image(data, (ax0, source_header.get_axis(1)))
     nib.save(data_img, out_file)
-    return
+    return    
+
+def replace_entities(file:str, entities:dict):
+    for entity, value in entities.items():
+        file = replace_entity(file, entity, value)
+    return file
+
+
+def replace_entity(file:str, entity:str, value:str):
+    if entity == "suffix":
+        prefix, suffix = file.rsplit("_", 1)
+        ext = suffix.split(".",1)[-1]
+        return f"{prefix}_{value}.{ext}"
+    
+    if entity == "ext":
+        return f"{file.split('.',1)[0]}{value}"
+    
+    if entity == "path":
+        fname=Path(file).name
+        if not value:
+            return fname
+        else:
+            return f"{value}/{fname}"
+    
+    entity_label = f"_{entity}-"
+    if entity_label in file:
+        prefix, suffix = file.split(entity_label, 1)
+        suffix = suffix.split("_",1)[-1]
+        if value is None:
+            return f"{prefix}_{suffix}"
+        return f"{prefix}{entity_label}{value}_{suffix}"

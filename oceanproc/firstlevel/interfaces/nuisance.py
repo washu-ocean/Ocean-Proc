@@ -65,7 +65,10 @@ class GenerateNuisanceMatrix(SimpleInterface):
     output_spec = _GenerateNuisanceMatrixOutputSpec
 
     def _run_interface(self, runtime):
-        out_file = fname_presuffix(self.inputs.confounds_file, suffix="-matrix.csv", newpath=runtime.cwd)
+        from ..utilities import replace_entities
+
+        out_file = replace_entities(self.inputs.confounds_file, 
+                                    {"desc":"nuisance", "suffix":"matrix", "ext":".csv", "path":None})
         generate_nuisance_matrix(
             confounds_file=self.inputs.confounds_file,
             confounds_columns=self.inputs.confounds_columns,
@@ -91,6 +94,10 @@ def generate_nuisance_matrix(confounds_file: str,
                              spike_threshold: float = None,
                              volterra_lag: int = None,
                              volterra_columns: list = None,):
+    from ..config import get_bids_file
+    bidsfile = get_bids_file(confounds_file)
+    run = int(bidsfile.entities.get("run", 1))
+    task = bidsfile.entities["task"]
     confounds_columns = set(confounds_columns)
     if spike_threshold:
         confounds_columns.add("framewise_displacement")
@@ -109,13 +116,13 @@ def generate_nuisance_matrix(confounds_file: str,
             b = 0
             for a in range(len(nuisance)):
                 if nuisance.loc[a, "framewise_displacement"] > spike_threshold:
-                    nuisance[f"spike{b}"] = 0
-                    nuisance.loc[a, f"spike{b}"] = 1
+                    nuisance[f"task-{task}-run-{run}-spike{b}"] = 0
+                    nuisance.loc[a, f"task-{task}-run-{run}-spike{b}"] = 1
                     b += 1
     if demean:
-        nuisance["mean"] = 1
+        nuisance[f"task-{task}-run-{run}-mean"] = 1
     if linear_trend:
-        nuisance["trend"] = np.arange(0, len(nuisance))
+        nuisance[f"task-{task}-run-{run}-trend"] = np.arange(0, len(nuisance))
     if volterra_columns and volterra_lag:
         for vc in volterra_columns:
             for lag in range(volterra_lag):
@@ -123,8 +130,8 @@ def generate_nuisance_matrix(confounds_file: str,
         nuisance.fillna(0, inplace=True)
 
     if str(output_path).endswith(".tsv"):
-        nuisance.to_csv(output_path, sep='\t')
+        nuisance.to_csv(output_path, sep='\t', index=False)
         return output_path
     elif str(output_path).endswith(".csv"):
-        nuisance.to_csv(output_path)
+        nuisance.to_csv(output_path, index=False)
         return output_path

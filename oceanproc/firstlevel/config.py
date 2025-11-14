@@ -67,13 +67,20 @@ def set_configs(args):
 
 
 
-def get_layout_for_file(file):
+def get_layout_for_file(file) -> bids.BIDSLayout:
     if isinstance(file, Path):
         file = str(file.resolve())
-    elif not isinstance(file, str):
+    if isinstance(file, str):
+        file = str(Path(file).resolve())
+    else:
         raise ValueError(f"argument must be of type Path or str, not {type(file)}")
 
     for lay in all_opts.layouts:
         if file.startswith(str(lay._root.resolve())):
             return lay
     raise RuntimeError(f"No layout correspond to the input file {file}")
+
+
+def get_bids_file(file):
+    file_layout = get_layout_for_file(file)
+    return file_layout.get_file(file)

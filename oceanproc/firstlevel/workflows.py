@@ -5,6 +5,7 @@ from nipype.interfaces.utility import IdentityInterface
 from niworkflows.utils.bids import collect_participants
 from niworkflows.interfaces.bids import DerivativesDataSink
 from oceanproc.firstlevel.interfaces.nuisance import GenerateNuisanceMatrix
+from oceanproc.firstlevel.interfaces.regression import ConcatRegressionData
 from oceanproc.firstlevel.interfaces.tmask import MakeTmask
 from . import operations
 from .interfaces import *
@@ -20,8 +21,10 @@ from bids.utils import listify
 
 
 
-def build_oceanfla_wf(task:str, subjects:str|list[str]|None, base_dir=Path|str):
-    fla_wf = Workflow(name=f"task_{task}_wf", base_dir=base_dir)
+def build_oceanfla_wf(subjects:list[str]|None, base_dir=Path|str):
+    tasks = all_opts.task
+    wf_name = f"tasks_{'-'.join(tasks)}_wf"
+    fla_wf = Workflow(name=wf_name, base_dir=base_dir)
     # fla_wf.base_dir = all_opts.work_dir
 
     subject_list = collect_participants(
@@ -31,18 +34,19 @@ def build_oceanfla_wf(task:str, subjects:str|list[str]|None, base_dir=Path|str):
     
     start_node = Node(
         IdentityInterface(
-            fields=["task"]
+            fields=["tasks"]
         ),
         name="task_start_node"
     )
-    start_node.inputs.task = task
+    start_node.inputs.tasks = tasks
 
     for sub in subject_list:
         sessions = all_opts.preproc_layout.get_sessions(subject=sub)
+        if len(sessions) == 0: sessions = [None]
         for ses in sessions:
             ses_wf = build_session_wf(subject=sub,
                                       session=ses,
-                                      task=task)
+                                      tasks=tasks)
             fla_wf.connect([
                 (start_node, ses_wf, [
                     ("task", "inputnode.task")
@@ -54,16 +58,16 @@ def build_oceanfla_wf(task:str, subjects:str|list[str]|None, base_dir=Path|str):
     
     
 
-def build_session_wf(subject, session, task):
+def build_session_wf(subject, session=None):
 
-    workflow = Workflow(name=f"sub_{subject}_ses_{session}_wf")
+    wf_name = f"sub_{subject}_{f'ses_{session}_' if session else ''}wf"
+    workflow = Workflow(name=wf_name)
 
     input_node = Node(
         IdentityInterface(
             fields=[
                 "subject",
                 "session",
-                "task",
             ]
         ),
         name="inputnode"
@@ -74,17 +78,16 @@ def build_session_wf(subject, session, task):
     space_run_info = utilities.parse_session_bold_files(layout=all_opts.preproc_layout,
                                                         subject=subject,
                                                         session=session,
-                                                        task=task)
+                                                        task=all_opts.task)
     space_dict = space_run_info[all_opts.func_space]
     func_space_wf = build_func_space_wf(func_space=all_opts.func_space,
-                                        run_list=space_dict["runs"],
+                                        run_map=space_dict["runs"],
                                         file_extension=space_dict["extension"])
     
     workflow.connect([
         (input_node, func_space_wf, [
             ("subject", "inputnode.subject"),
             ("session", "inputnode.session"),
-            ("task", "inputnode.task"),
         ])
     ])
 
@@ -110,7 +113,7 @@ def build_session_wf(subject, session, task):
 
 
 
-def build_func_space_wf(func_space:str, run_list:list[PaddedInt], file_extension:str):
+def build_func_space_wf(func_space:str, run_map:dict, file_extension:str):
 
     # Define the workflow and the input node for this functional space
     workflow = Workflow(name=f"space_{func_space}_wf")
@@ -120,7 +123,6 @@ def build_func_space_wf(func_space:str, run_list:list[PaddedInt], file_extension
             fields=[
                 "subject",
                 "session",
-                "task",
             ]
         ),
         name="inputnode"
@@ -131,7 +133,7 @@ def build_func_space_wf(func_space:str, run_list:list[PaddedInt], file_extension
         BIDSDataGrabber(
             base_dir = all_opts.preproc_bids,
             datatype = 'func',
-            
+            task = all_opts.task,
             output_query = {
                 'bold': { 
                     'suffix': 'bold', 
@@ -153,6 +155,7 @@ def build_func_space_wf(func_space:str, run_list:list[PaddedInt], file_extension
         BIDSDataGrabber(
             base_dir = all_opts.raw_bids,
             datatype = 'func',
+            task = all_opts.task,
             output_query = {
                 'events': {
                     'suffix': 'events',
@@ -169,51 +172,54 @@ def build_func_space_wf(func_space:str, run_list:list[PaddedInt], file_extension
         (input_node, derivs_grabber, [
             ("subject", "subject"),
             ("session", "session"),
-            ("task", "task")
+            ("tasks", "task")
         ]),
         (input_node, rawdata_grabber, [
             ("subject", "subject"),
             ("session", "session"),
-            ("task", "task")
+            ("tasks", "task")
         ])
     ])
 
     # Create a run-level workflow for each run that has this functional space
-    for run in sorted(run_list):
-        run_level_wf = build_run_workflow(run=run)
+    for task in all_opts.tasks:
+        run_list = run_map[task]
+        for run in sorted(run_list):
+            run_level_wf = build_run_workflow(run=run, task=task)
 
-        # Define a node to extract the run-specific files from the data-grabbers
-        extract_run_group_node = Node(
-            operations.ExtractRunGroup,
-            name="extract_run_group_node"
-        )
-        # extract_run_group_node = Node( operations.ExtractRunGroup
-        #     Function(
-        #         function=operations.extract_run_group,
-        #         input_names=["bold_list", "confounds_list", "events_list", "run_needed"],
-        #         output_names=["bold_file",
-        #                     "confounds_file",
-        #                     "events_file"]
-        #     ),
-        #     name="extract_run_group_node"
-        # )
-        extract_run_group_node.inputs.run_needed = run
-        
-        # Connect the files to the run-level workflow
-        workflow.connect([
-            (derivs_grabber, extract_run_group_node, [
-                ("bold", "bold_list"),
-                ("confounds", "confounds_list")
-            ]),
-            (rawdata_grabber, extract_run_group_node, [
-                ("events", "events_list"),
-            ]),
-            (extract_run_group_node, run_level_wf, [
-                ("bold_file", "inputnode.bold_file"),
-                ("confounds_file", "inputnode.confounds_file"),
-                ("events_file", "inputnode.events_file"),
+            # Define a node to extract the run-specific files from the data-grabbers
+            extract_task_run_group_node = Node(
+                operations.ExtractTaskRunGroup,
+                name="extract_run_group_node"
+            )
+            # extract_run_group_node = Node( operations.ExtractRunGroup
+            #     Function(
+            #         function=operations.extract_run_group,
+            #         input_names=["bold_list", "confounds_list", "events_list", "run_needed"],
+            #         output_names=["bold_file",
+            #                     "confounds_file",
+            #                     "events_file"]
+            #     ),
+            #     name="extract_run_group_node"
+            # )
+            extract_task_run_group_node.inputs.run_needed = run
+            extract_task_run_group_node.inputs.task_needed = task
+            
+            # Connect the files to the run-level workflow
+            workflow.connect([
+                (derivs_grabber, extract_task_run_group_node, [
+                    ("bold", "bold_list"),
+                    ("confounds", "confounds_list")
+                ]),
+                (rawdata_grabber, extract_task_run_group_node, [
+                    ("events", "events_list"),
+                ]),
+                (extract_task_run_group_node, run_level_wf, [
+                    ("bold_file", "inputnode.bold_file"),
+                    ("confounds_file", "inputnode.confounds_file"),
+                    ("events_file", "inputnode.events_file"),
+                ])
             ])
-        ])
     
 
     ## DO STUFF AFTER THE RUN-LEVEL WORKFLOWS ###
@@ -224,11 +230,11 @@ def build_func_space_wf(func_space:str, run_list:list[PaddedInt], file_extension
 
 
 
-def build_run_workflow(run):
+def build_run_workflow(run, task):
 
     # Define the workflow and the inputnode
 
-    workflow = Workflow(name=f"run_{run}_wf")
+    workflow = Workflow(name=f"task_{task}_run_{run}_processsing_wf")
 
     inputnode = Node(
         IdentityInterface(
@@ -337,9 +343,37 @@ def build_run_workflow(run):
     if all_opts.nuisance_regression:
         pass
 
-
-
     return workflow
 
 
 
+def build_regression_workflow(tasks, run=None):
+    
+    wf_label = f"task_{'-'.join(tasks)}"
+    if run:
+        wf_label += f"_run_{run}"
+    workflow = Workflow(name=f"{wf_label}_regression_wf")
+
+    inputnode = Node(
+        IdentityInterface(
+            fields=[
+                "func_files",
+                "event_mats",
+                "tmask_files",
+                "nuisance_mats",
+                "nuisance_columns",
+            ]
+        ),
+        name = "inputnode"
+    )
+
+    concat_data_node = Node(
+        ConcatRegressionData(
+            include_global_mean=(run is not None),
+            tasks=tasks,
+            brain_mask=all_opts.brain_mask, 
+        ),
+        name="concat_data_node"
+    )
+
+    

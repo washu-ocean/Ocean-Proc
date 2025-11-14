@@ -70,7 +70,10 @@ class EventsMatrix(SimpleInterface):
     output_spec = EventsMatrixOutputSpec
     
     def _run_interface(self, runtime):
-        out_file = fname_presuffix(self.inputs.event_file, suffix="-matrix.csv", newpath=runtime.cwd)
+        from .utilities import replace_entities
+
+        out_file = replace_entities(self.inputs.event_file, 
+                                    {"desc": "events", "suffix":"matrix", "ext":".csv", "path":None})
         make_design_matrix(
             event_file=self.inputs.event_file,
             tr=self.inputs.tr,
@@ -296,8 +299,8 @@ def create_hrf(time, time_to_peak=5, undershoot_dur=12):
     
 
 
-def _extract_run_group(bold_list:list, confounds_list:list, events_list:list, run_needed):
-    from oceanproc.firstlevel.config import get_layout_for_file
+def _extract_task_run_group(bold_list:list, confounds_list:list, events_list:list, task_needed, run_needed):
+    from oceanproc.firstlevel.config import get_bids_file
     run_dict = {
         "bold":None,
         "confounds":None,
@@ -305,10 +308,9 @@ def _extract_run_group(bold_list:list, confounds_list:list, events_list:list, ru
     }
     for ftype, file_list in {"bold":bold_list, "confounds":confounds_list, "events":events_list}.items():
         for file in file_list:
-            layout = get_layout_for_file(file)
-            bids_file = layout.get_file(file)
-            run = int(bids_file.entities["run"]) if "run" in bids_file.entities else 1
-            if run == int(run_needed):
+            bids_file = get_bids_file(file)
+            run = int(bids_file.entities.get("run", 1))
+            if run == int(run_needed) and bids_file.entities["task"] == task_needed:
                 run_dict[ftype] = bids_file
                 break
     
@@ -317,8 +319,8 @@ def _extract_run_group(bold_list:list, confounds_list:list, events_list:list, ru
     
     return run_dict["bold"], run_dict["confounds"], run_dict["events"]
 
-ExtractRunGroup = Function(
-    function=_extract_run_group,
+ExtractTaskRunGroup = Function(
+    function=_extract_task_run_group,
     input_names=["bold_list", "confounds_list", "events_list", "run_needed"],
     output_names=["bold_file",
                 "confounds_file",

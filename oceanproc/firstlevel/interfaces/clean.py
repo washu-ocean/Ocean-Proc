@@ -119,14 +119,17 @@ class PercentChange(SimpleInterface):
     output_spec = PercentChangeOutputSpec
 
     def _run_interface(self, runtime):
+        from ..utilities import replace_entities
         mask = np.loadtxt(self.inputs.in_mask).astype(bool)
         psc_data = percent_signal_change(
             data = load_data(self.inputs.func_file, self.inputs.brain_mask),
             mask = mask
         )
-
-        _, fname, ext = split_filename(self.inputs.func_file)
-        out_path = f"{runtime.cwd}/{fname}_percent-change{ext}"
+        
+        out_path = replace_entities(
+            file=self.inputs.func_file,
+            entities={"desc":"percent-change", "path":None}
+        )
         create_image_like(data=psc_data, 
                           source_header=self.inputs.func_file, 
                           out_file=out_path,
