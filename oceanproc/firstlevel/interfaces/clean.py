@@ -68,6 +68,9 @@ class FilterData(SimpleInterface):
     output_spec = _FilterDataOutputSpec
 
     def _run_interface(self, runtime):
+        from ..utilities import replace_entities
+        import numpy as np 
+
         mask = np.loadtxt(self.inputs.in_mask).astype(bool)
         filtered_fdata = filter_data(
             func_data= load_data(self.inputs.func_file, self.inputs.brain_mask),
@@ -78,8 +81,10 @@ class FilterData(SimpleInterface):
             padtype=self.inputs.padtype,
             padlen=self.inputs.padlen
         )
-        _, fname, ext = split_filename(self.inputs.func_file)
-        out_path = f"{runtime.cwd}/{fname}_filtered{ext}"
+        out_path = replace_entities(
+            file=self.inputs.func_file,
+            entities={"desc":"filtered", "path":runtime.cwd}
+        )
         create_image_like(data=filtered_fdata, 
                           source_header=self.inputs.func_file, 
                           out_file=out_path,
@@ -128,7 +133,7 @@ class PercentChange(SimpleInterface):
         
         out_path = replace_entities(
             file=self.inputs.func_file,
-            entities={"desc":"percent-change", "path":None}
+            entities={"desc":"percent-change", "path":runtime.cwd}
         )
         create_image_like(data=psc_data, 
                           source_header=self.inputs.func_file, 

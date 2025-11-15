@@ -68,7 +68,7 @@ class GenerateNuisanceMatrix(SimpleInterface):
         from ..utilities import replace_entities
 
         out_file = replace_entities(self.inputs.confounds_file, 
-                                    {"desc":"nuisance", "suffix":"matrix", "ext":".csv", "path":None})
+                                    {"desc":"nuisance", "suffix":"matrix", "ext":".csv", "path":runtime.cwd})
         generate_nuisance_matrix(
             confounds_file=self.inputs.confounds_file,
             confounds_columns=self.inputs.confounds_columns,

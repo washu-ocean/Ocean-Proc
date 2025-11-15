@@ -187,6 +187,8 @@ def _build_parser():
                                   help="The confound columns to include in the expansion. Must be specifed with the '--volterra_lag' option.")
     config_arguments.add_argument("--parcellate", "-parc", type=ExistingFile,
                                   help="Path to a dlabel file to use for parcellation of a dtseries")
+    config_arguments.add_argument("--stdscale_glm", choices=["runlevel", "seslevel", "both", "none"], default="seslevel",
+                                  help="Option to standard scale concatenated timeseries before running final GLM (after masking & nuisance regression)")
 
     return (parser, config_arguments)
 

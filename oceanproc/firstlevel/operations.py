@@ -73,7 +73,7 @@ class EventsMatrix(SimpleInterface):
         from .utilities import replace_entities
 
         out_file = replace_entities(self.inputs.event_file, 
-                                    {"desc": "events", "suffix":"matrix", "ext":".csv", "path":None})
+                                    {"desc": "events", "suffix":"matrix", "ext":".csv", "path":runtime.cwd})
         make_design_matrix(
             event_file=self.inputs.event_file,
             tr=self.inputs.tr,

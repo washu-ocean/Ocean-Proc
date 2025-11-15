@@ -101,7 +101,7 @@ class MakeTmask(SimpleInterface):
                 "desc": f"{str(self.inputs.fd_threshold).replace('.', 'p')}mm", 
                 "suffix": "tmask", 
                 "ext": ".txt",
-                "path": None
+                "path": runtime.cwd
         })
         make_tmask(
             in_file=self.inputs.confounds_file,

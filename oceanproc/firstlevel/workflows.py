@@ -5,7 +5,7 @@ from nipype.interfaces.utility import IdentityInterface
 from niworkflows.utils.bids import collect_participants
 from niworkflows.interfaces.bids import DerivativesDataSink
 from oceanproc.firstlevel.interfaces.nuisance import GenerateNuisanceMatrix
-from oceanproc.firstlevel.interfaces.regression import ConcatRegressionData
+from oceanproc.firstlevel.interfaces.regression import ConcatRegressionData, RunGLMRegression
 from oceanproc.firstlevel.interfaces.tmask import MakeTmask
 from . import operations
 from .interfaces import *
@@ -367,6 +367,17 @@ def build_regression_workflow(tasks, run=None):
         name = "inputnode"
     )
 
+    outputnode = Node(
+        IdentityInterface(
+            fields=[
+                "beta_files",
+                "beta_labels",
+                "func_residual_file"
+            ]
+        ),
+        name="outputnode"
+    )
+
     concat_data_node = Node(
         ConcatRegressionData(
             include_global_mean=(run is not None),
@@ -376,4 +387,17 @@ def build_regression_workflow(tasks, run=None):
         name="concat_data_node"
     )
 
-    
+    stdscale = (all_opts.stdscale_glm in ["both", "runlevel"] 
+                    ) if run else (
+                all_opts.stdscale_glm in ["both", "seslevel"])
+    glm_node = Node(
+        RunGLMRegression(
+            stdscale = stdscale,
+            brain_mask=all_opts.brain_mask
+        ),
+        name="glm_regression_node"
+    )
+
+    workflow.connect(
+        ##connect up 
+    )

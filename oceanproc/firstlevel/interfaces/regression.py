@@ -1,7 +1,7 @@
+from mimetypes import suffix_map
 from librosa import ex
 from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
-    File,
     SimpleInterface,
     TraitedSpec,
     traits,
@@ -16,11 +16,48 @@ from nipype.utils.filemanip import split_filename, fname_presuffix
 
 
 class RunGLMRegressionInputSpec(BaseInterfaceInputSpec):
-    pass
+    func_file = traits.File(
+        exists=True,
+        desc="The functional data file"
+    )
+
+    design_matrix = traits.File(
+        exists=True,
+        desc="The design matrix for the regression"
+    )
+
+    tmask_file = traits.File(
+        exists=True,
+        desc="The temporal mask file",
+    )
+
+    stdscale = traits.Bool(
+        default_value=False,
+        desc="Flag to indicate standard scaling the data before the regression"
+    )
+
+    brain_mask = traits.Union( 
+        traits.File(exists=True),
+        None, 
+        default_value=None,
+        desc="The brain mask that accompanies volumetric data"
+    )
 
 
 class RunGLMRegressionOutputSpec(TraitedSpec):
-    pass
+    beta_files = traits.List(
+        trait=traits.File(exists=True),
+        desc=""
+    )
+    
+    beta_labels = traits.List(
+        trait=traits.Str,
+        desc=""
+    )
+    
+    func_residual_file = traits.File(
+        exists=True,
+        desc="")
 
 
 class RunGLMRegression(SimpleInterface):
@@ -28,8 +65,48 @@ class RunGLMRegression(SimpleInterface):
     output_spec = RunGLMRegressionOutputSpec
 
     def _run_interface(self, runtime):
-        return super()._run_interface(runtime)
-    
+        from ..utilities import load_data, create_image_like, replace_entities
+        import pandas as pd
+        import numpy as np
+        beta_map, func_residuals = massuni_linGLM(
+            func_data=load_data(self.inputs.func_file),
+            design_matrix=pd.read_csv(self.inputs.design_matrix, sep="\t"),
+            mask=np.loadtxt(self.inputs.tmask_file),
+            stdscale=self.inputs.stdscale
+        )
+
+        entities_base = {"desc":"modelOutput", "path":runtime.cwd}
+        beta_files, beta_labels, = [], []
+        for beta_label, beta_data in beta_map.items():
+            beta_filename = replace_entities(
+                file=self.inputs.func_file,
+                entities=entities_base.update({"desc":f"beta-{beta_label}", "suffix":"boldmap"})
+            )
+            create_image_like(
+                data=beta_data[np.newaxis,:],
+                source_header=self.inputs.func_file,
+                out_file=beta_filename,
+                dscalar_axis=[f"beta-{beta_label}"],
+                brain_mask=self.inputs.brain_mask
+            )
+            beta_files.append(beta_filename)
+            beta_labels.append(beta_label)
+        
+        residual_filename = replace_entities(
+            file=self.inputs.func_file,
+            entities=entities_base.update({"desc":"residual"})
+        )
+        create_image_like(
+            data=func_residuals,
+            source_header=self.inputs.func_file,
+            out_file=residual_filename,
+            brain_mask=self.inputs.brain_mask
+        )
+
+        self._results["beta_files"] = beta_files
+        self._results["beta_labels"] = beta_labels
+        self._results["func_residual_file"] = residual_filename
+        return runtime
 
 
 class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
@@ -126,7 +203,7 @@ class ConcatRegressionData(SimpleInterface):
         )
 
         task_label = "-".join(listify(self.inputs.tasks))
-        entities_base = {"desc":"glm-input", "task":task_label, "path":None}
+        entities_base = {"desc":"modelInput", "task":task_label, "path":runtime.cwd}
         if len(func_files) > 1:
             entities_base["run"] = None
 
@@ -138,11 +215,11 @@ class ConcatRegressionData(SimpleInterface):
             brain_mask=self.inputs.brain_mask)
 
         final_design_file = replace_entities(file=event_matrices[0], entities=entities_base.update({"suffix":"design"}))
-        final_design_matrix.to_csv(final_design_file, index=False)
+        final_design_matrix.to_csv(final_design_file, index=False, sep="\t")
 
         tmask_desc = parse_file_entities(tmask_files[0])["desc"]
         final_tmask_file = replace_entities(file=event_matrices[0], entities=entities_base.update({"desc":f"glm-input-{tmask_desc}"}))
-        np.savetxt(final_tmask_file)
+        np.savetxt(final_tmask_file, final_tmask)
 
         self._results["func_file_out"] = final_func_file
         self._results["design_file_out"] = final_design_file
@@ -172,16 +249,16 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     assert mask.dtype == bool
 
     # apply the mask to the data
-    design_matrix = design_matrix.to_numpy()
+    design_matrix_data = design_matrix.to_numpy()
 
     func_ss = StandardScaler()
     design_ss = StandardScaler()
     if stdscale:
         masked_func_data = func_ss.fit_transform(func_data.copy()[mask, :])
-        masked_design_matrix = design_ss.fit_transform(design_matrix.copy()[mask, :])
+        masked_design_matrix = design_ss.fit_transform(design_matrix_data.copy()[mask, :])
     else:
         masked_func_data = func_data.copy()[mask, :]
-        masked_design_matrix = design_matrix.copy()[mask, :]
+        masked_design_matrix = design_matrix_data.copy()[mask, :]
 
     # standardize the masked data
 
@@ -192,13 +269,14 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     # standardize the unmasked data
     if stdscale:
         func_data = func_ss.transform(func_data)
-        design_matrix = design_ss.transform(design_matrix)
+        design_matrix_data = design_ss.transform(design_matrix_data)
 
     # compute the residuals with unmasked data
-    est_values = np.dot(design_matrix, beta_data)
+    est_values = np.dot(design_matrix_data, beta_data)
     resids = func_data - est_values
 
-    return (beta_data, resids)
+    beta_map = {c: beta_data[i] for i, c in enumerate(design_matrix.columns)}
+    return (beta_map, resids)
 
 
 
