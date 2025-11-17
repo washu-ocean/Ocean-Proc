@@ -231,6 +231,7 @@ def build_func_space_wf(func_space:str, run_map:dict, file_extension:str):
 
 
 def build_run_workflow(run, task):
+    from interfaces.nuisance import make_regressor_run_specific
 
     # Define the workflow and the inputnode
 
@@ -284,7 +285,7 @@ def build_run_workflow(run, task):
             hrf_vars = all_opts.hrf_vars,
             unmodeled = all_opts.unmodeled,
         ),
-        name="events_matix_node"
+        name="events_matrix_node"
     )
 
     nuisance_mat_node = Node(
@@ -331,23 +332,29 @@ def build_run_workflow(run, task):
         ])
     ])
 
+    last_func_node = inputnode
 
-    if all_opts.highpass or all_opts.lowpass:
-        if "mean" not in all_opts.nuisance_regression:
-            # logger.warning("High-, low-, or band-pass specified, but mean not specified as nuisance regressor -- adding this in automatically")
-            all_opts.nuisance_regression.append("mean")
-        if "trend" not in all_opts.nuisance_regression:
-            # logger.warning("High-, low-, or band-pass specified, but trend not specified as nuisance regressor -- adding this in automatically")
-            all_opts.nuisance_regression.append("trend")
-    
-    if all_opts.nuisance_regression:
+
+    if all_opts.percent_change: 
+        # make psc node
         pass
+    
+    # regression_columns = []
+    if all_opts.nuisance_regression:
+        regression_columns = [rc if rc not in all_opts.generic_nuisance_columns 
+                              else make_regressor_run_specific(rc, run=run, task=task) 
+                              for rc in all_opts.nuisance_regression]
+        regression_wf = build_regression_workflow(tasks=task, run=run, regression_columns=regression_columns)
+        last_func_node = regression_wf.inputs.outputnode
+        workflow.connect()
+
+    
 
     return workflow
 
 
 
-def build_regression_workflow(tasks, run=None):
+def build_regression_workflow(tasks, run=None, regression_columns=None):
     
     wf_label = f"task_{'-'.join(tasks)}"
     if run:
@@ -361,26 +368,30 @@ def build_regression_workflow(tasks, run=None):
                 "event_mats",
                 "tmask_files",
                 "nuisance_mats",
-                "nuisance_columns",
+                "regressor_columns",
             ]
         ),
         name = "inputnode"
     )
+    inputnode.inputs.regressor_columns = regression_columns
 
+    output_fields = [
+        "beta_files",
+        "beta_labels",
+        "func_file_out",
+        "design_matrix",
+        "residual_design_matrix"
+    ]
     outputnode = Node(
         IdentityInterface(
-            fields=[
-                "beta_files",
-                "beta_labels",
-                "func_residual_file"
-            ]
+            fields=output_fields
         ),
         name="outputnode"
     )
 
     concat_data_node = Node(
         ConcatRegressionData(
-            include_global_mean=(run is not None),
+            include_global_mean=(run is None),
             tasks=tasks,
             brain_mask=all_opts.brain_mask, 
         ),
@@ -398,6 +409,25 @@ def build_regression_workflow(tasks, run=None):
         name="glm_regression_node"
     )
 
-    workflow.connect(
-        ##connect up 
-    )
+    workflow.connect([
+       (inputnode, concat_data_node, [
+           ("func_files", "func_files"),
+           ("event_mats", "event_matrices"),
+           ("tmask_files", "tmask_files"),
+           ("regressor_columns", "regressor_columns")
+       ]),
+       (concat_data_node, glm_node, [
+           ("func_file_out", "func_file"),
+           ("design_file_out", "design_matrix"),
+           ("tmask_file_out", "tmask_file")
+       ]),
+       (concat_data_node, outputnode, [
+           ("design_file_out", "design_matrix")
+           ("residual_design_file", "residual_design_matrix"),
+       ]),
+       (glm_node, outputnode, [
+           ("beta_files", "beta_files"),
+           ("beta_labels", "beta_labels"),
+           ("func_residual_file", "func_file_out")
+       ])
+    ])

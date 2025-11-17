@@ -94,10 +94,7 @@ def generate_nuisance_matrix(confounds_file: str,
                              spike_threshold: float = None,
                              volterra_lag: int = None,
                              volterra_columns: list = None,):
-    from ..config import get_bids_file
-    bidsfile = get_bids_file(confounds_file)
-    run = int(bidsfile.entities.get("run", 1))
-    task = bidsfile.entities["task"]
+    
     confounds_columns = set(confounds_columns)
     if spike_threshold:
         confounds_columns.add("framewise_displacement")
@@ -116,13 +113,14 @@ def generate_nuisance_matrix(confounds_file: str,
             b = 0
             for a in range(len(nuisance)):
                 if nuisance.loc[a, "framewise_displacement"] > spike_threshold:
-                    nuisance[f"task-{task}-run-{run}-spike{b}"] = 0
-                    nuisance.loc[a, f"task-{task}-run-{run}-spike{b}"] = 1
+                    spike_col = make_regressor_run_specific(confounds_file, f"spike{b}")
+                    nuisance[spike_col] = 0
+                    nuisance.loc[a, spike_col] = 1
                     b += 1
     if demean:
-        nuisance[f"task-{task}-run-{run}-mean"] = 1
+        nuisance[make_regressor_run_specific(confounds_file, "mean")] = 1
     if linear_trend:
-        nuisance[f"task-{task}-run-{run}-trend"] = np.arange(0, len(nuisance))
+        nuisance[make_regressor_run_specific(confounds_file, "trend")] = np.arange(0, len(nuisance))
     if volterra_columns and volterra_lag:
         for vc in volterra_columns:
             for lag in range(volterra_lag):
@@ -134,4 +132,16 @@ def generate_nuisance_matrix(confounds_file: str,
         return output_path
     elif str(output_path).endswith(".csv"):
         nuisance.to_csv(output_path, index=False)
-        return output_path
+        return 
+    
+
+
+def make_regressor_run_specific(regressor_name:str, bids_source_file:str|Path=None,  run=None, task=None):
+    if (run is None) or (task is None):
+        if bids_source_file is None: 
+            raise RuntimeError("'run' and 'task' parameters must be provided if 'bids_source_file' is not provided.")
+        from ..config import get_bids_file
+        bidsfile = get_bids_file(bids_source_file)
+        run = int(bidsfile.entities.get("run", 1))
+        task = bidsfile.entities["task"]
+    return f"task-{task}-run-{run}-{regressor_name}"

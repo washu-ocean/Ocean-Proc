@@ -37,7 +37,7 @@ class _FilterDataInputSpec(BaseInterfaceInputSpec):
         desc="The Repetition Time for this BOLD run"
     )
     padtype = traits.Str(
-        "zero",
+        "mean",
         desc="Type of padding to use -- choices: 'odd', 'even', 'constant', 'zero', or 'none'"
     )
     padlen = traits.Int(
@@ -160,9 +160,8 @@ def filter_data(func_data: npt.ArrayLike,
     )):
         raise ValueError(f"Pad length of {padlen} incompatible with pad type {'odd' if padtype is None else padtype}")
 
-    padded_func_data = np.pad(func_data, ((padlen, padlen), (0, 0)), mode='constant', constant_values=0)
+    padded_func_data = np.pad(func_data, ((padlen, padlen), (0, 0)), mode='mean')
     padded_mask = np.pad(mask, (padlen, padlen), mode='constant', constant_values=True)
-
     # if the mask is excluding frames, interpolate the censored frames
     if np.sum(mask) < mask.shape[0]:
         padded_func_data, _, padded_mask = _handle_scrubbed_volumes(
@@ -179,7 +178,7 @@ def filter_data(func_data: npt.ArrayLike,
         sampling_rate=1.0 / tr,
         low_pass=low_pass,
         high_pass=high_pass,
-        padtype=None if padtype == "none" else padtype,
+        padtype=None #if padtype == "none" else padtype,
     )[padlen:-padlen, :]  # remove 0-pad frames on both sides
 
     assert filtered_data.shape[0] == func_data.shape[0], "Filtered data must have the same number of timepoints as the original functional data"

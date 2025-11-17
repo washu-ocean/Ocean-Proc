@@ -11,6 +11,8 @@ import pandas as pd
 import numpy.typing as npt
 from sklearn.preprocessing import StandardScaler
 from pathlib import Path
+
+from oceanproc.firstlevel.interfaces import nuisance
 from ..utilities import load_data, create_image_like
 from nipype.utils.filemanip import split_filename, fname_presuffix
 
@@ -119,6 +121,7 @@ class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
     event_matrices = traits.Union(
         traits.List(trait=traits.File(exists=True)),
         traits.File(exists=True),
+        None,
         desc="A list of event matrix files"
     )
 
@@ -135,7 +138,7 @@ class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
         desc="A list of temporal mask files "
     )
 
-    nuisance_columns = traits.Union(
+    regressor_columns = traits.Union(
         traits.List(trait=traits.Str),
         None,
         default_value=None,
@@ -174,6 +177,12 @@ class ConcatRegressionDataOutputSpec(TraitedSpec):
     tmask_file_out = traits.File(
         exists=True,
         desc="")
+    
+    residual_design_file = traits.Union(
+        traits.File(exists=True),
+        None,
+        desc="The design matrix using the columns that are not needed for the current regression"
+    )
 
 
 
@@ -193,12 +202,12 @@ class ConcatRegressionData(SimpleInterface):
         tmask_files = listify(self.inputs.tmask_files)
         nuisance_matrices = listify(self.nuisance_matrices)
 
-        final_func_data, final_design_matrix, final_tmask = combine_regression_data(
+        final_func_data, final_tmask, final_design_matrix, residual_design_matrix = combine_regression_data(
             func_data_list= [load_data(f) for f in func_files],
-            event_matrices= [pd.read_csv(f) for f in event_matrices],
+            event_matrices= [pd.read_csv(f) for f in event_matrices] if nuisance_matrices else None,
             tmask_list= [np.loadtxt(f) for f in tmask_files],
             nuisance_matrices= [np.loadtxt(f) for f in nuisance_matrices] if nuisance_matrices else None, 
-            nuisance_columns= self.inputs.nuisance_columns,
+            regressor_columns= self.inputs.regressor_columns,
             global_mean= self.inputs.include_global_mean
         )
 
@@ -213,17 +222,25 @@ class ConcatRegressionData(SimpleInterface):
             source_header=func_files[0],
             out_file=final_func_file,
             brain_mask=self.inputs.brain_mask)
+        
+        tmask_desc = parse_file_entities(tmask_files[0])["desc"]
+        final_tmask_file = replace_entities(file=event_matrices[0], entities=entities_base.update({"desc":f"modelInput-{tmask_desc}"}))
+        np.savetxt(final_tmask_file, final_tmask)
 
         final_design_file = replace_entities(file=event_matrices[0], entities=entities_base.update({"suffix":"design"}))
         final_design_matrix.to_csv(final_design_file, index=False, sep="\t")
 
-        tmask_desc = parse_file_entities(tmask_files[0])["desc"]
-        final_tmask_file = replace_entities(file=event_matrices[0], entities=entities_base.update({"desc":f"glm-input-{tmask_desc}"}))
-        np.savetxt(final_tmask_file, final_tmask)
-
         self._results["func_file_out"] = final_func_file
         self._results["design_file_out"] = final_design_file
         self._results["tmask_file_out"] = final_tmask_file
+
+        if residual_design_matrix:
+            residual_design_file = replace_entities(file=event_matrices[0], entities=entities_base.update({"suffix":"design", "desc":"unused"}))
+            residual_design_matrix.to_csv(residual_design_file, index=False, sep="\t")
+            self._results["residual_design_file"] = residual_design_file
+        else:
+            self._results["residual_design_file"] = None
+
         return runtime
     
 
@@ -331,41 +348,91 @@ def massuni_linGLM(func_data: npt.ArrayLike,
 
 
 def combine_regression_data(func_data_list: list,
-                            event_matrices: list,
                             tmask_list: list,
+                            event_matrices: list = None,
                             nuisance_matrices: list = None,
-                            nuisance_columns: list[str] = None,
+                            regressor_columns: list[str] = None,
                             global_mean=True):
     import numpy as np
     import pandas as pd
 
-    lengths = [len(x) for x in [func_data_list, event_matrices, tmask_list]]
+    lengths = [len(x) for x in [func_data_list, tmask_list]]
     if not len(set(lengths)) == 1:
         raise RuntimeError(f"All input lists must be the same length: {set(lengths)}")
-
-    if nuisance_matrices and (len(nuisance_matrices) != lengths[0]):
-        raise RuntimeError(f"Expected length of nuisance matrix list to be {lengths[0]} but it was {len(nuisance_matrices)}")
+    needed_len = lengths[0]
     
-    design_list = []
-    for i in range(len(event_matrices)):
-        event_mat = event_matrices[i]
-        time_axis = [len(event_mat), func_data_list[i].shape[0], tmask_list[i].shape[0]]
+    # need either event matrices or nuisance matrices
+    input_lists = []
+    for l in [event_matrices, nuisance_matrices]:
+        if l:
+            if len(l) != needed_len:
+                raise RuntimeError(f"Expected length of input list to be {needed_len} but it was {len(l)}")
+            input_lists.append(l)
+    if len(input_lists) < 1:
+        raise RuntimeError(f"Regression data must include event data or nuisance data, but recieved neither")
+    
+    # combine the data matrices if needed
+    design_data_list = [tuple([in_list[i] for in_list in input_lists]) for i in range(needed_len)]
+    for i in range(needed_len):
+        time_axis = [len(design_data_list[i][0]), func_data_list[i].shape[0], tmask_list[i].shape[0]]
+        if len(design_data_list[i]) == 2:
+            time_axis.append(len(design_data_list[i][1]))
         if not len(set(time_axis)) == 1:
             raise RuntimeError(f"Grouped functional data, events matrix, and tmask must all have the same number of timepoints, but don't: {set(time_axis)}")
-        if nuisance_matrices:
-            nuisance_mat = nuisance_matrices[i]
-            if len(event_mat) != len(nuisance_mat):
-                raise RuntimeError(f"Length of the nuisance matrix ({len(nuisance_mat)}) does not match the length of the data group ({len(event_mat)})")
-            if nuisance_columns:
-                nuisance_mat = nuisance_mat.loc[:, nuisance_columns]
-            event_mat = pd.concat([event_mat.reset_index(drop=True), nuisance_mat.reset_index(drop=True)], axis=1)
-        design_list.append(event_mat)
+        
+        run_design = ( 
+            pd.concat([design_data_list[i][0].reset_index(drop=True), 
+                    design_data_list[i][1].reset_index(drop=True)], axis=1)
+                    ) if len(design_data_list[i]) == 2 else ( 
+            design_data_list[i][0])
+        
+        # only grab the requested columns if needed
+        # if regressor_columns:
+        #     run_design = run_design.loc[:, regressor_columns]
+        
+        design_data_list[i] = run_design
+    
+    # concatenate all of the data on the time axis
+    res_list = [
+        np.concatenate(func_data_list, axis=0), # concat the func data
+        np.concatenate(tmask_list, axis=0), # concat the tmask data
+    ]
 
-    final_design = pd.concat(design_list, axis=0, ignore_index=True).fillna(0)
+    final_design = pd.concat(design_data_list, axis=0, ignore_index=True).fillna(0)
+    residual_design = None
+    if regressor_columns:
+        design_columns = final_design.columns.to_list()
+        residual_columns = [dc for dc in design_columns if dc not in regressor_columns]
+        residual_design = final_design.loc[:, residual_columns]
+        final_design = final_design.loc[:, regressor_columns]
+
     if global_mean:
         final_design.loc[:, "global_mean"] = 1
+    res_list.append(final_design)
+    res_list.append(residual_design)
 
-    final_data = np.concatenate(func_data_list, axis=0)
-    final_mask = np.concatenate(tmask_list, axis=0)
+    return res_list
+            
+    # design_list = []
+    # for i in range(len(event_matrices)):
+    #     event_mat = event_matrices[i]
+    #     time_axis = [len(event_mat), func_data_list[i].shape[0], tmask_list[i].shape[0]]
+    #     if not len(set(time_axis)) == 1:
+    #         raise RuntimeError(f"Grouped functional data, events matrix, and tmask must all have the same number of timepoints, but don't: {set(time_axis)}")
+    #     if nuisance_matrices:
+    #         nuisance_mat = nuisance_matrices[i]
+    #         if len(event_mat) != len(nuisance_mat):
+    #             raise RuntimeError(f"Length of the nuisance matrix ({len(nuisance_mat)}) does not match the length of the data group ({len(event_mat)})")
+    #         if regressor_columns:
+    #             nuisance_mat = nuisance_mat.loc[:, regressor_columns]
+    #         event_mat = pd.concat([event_mat.reset_index(drop=True), nuisance_mat.reset_index(drop=True)], axis=1)
+    #     design_list.append(event_mat)
 
-    return final_data, final_design, final_mask
+    # final_design = pd.concat(design_list, axis=0, ignore_index=True).fillna(0)
+    # if global_mean:
+    #     final_design.loc[:, "global_mean"] = 1
+
+    # final_data = np.concatenate(func_data_list, axis=0)
+    # final_mask = np.concatenate(tmask_list, axis=0)
+
+    # return final_data, final_design, final_mask

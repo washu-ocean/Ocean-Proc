@@ -10,6 +10,7 @@ class Options():
     _instance = None
     _initialized = False
     layouts = []
+    generic_nuisance_columns = ["mean", "trend", "spike"]
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
