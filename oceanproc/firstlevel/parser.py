@@ -75,6 +75,16 @@ def _build_parser():
 
     def PositiveFloat(val):
         return PositiveVal(val, float)
+    
+    def Percent(val):
+        if float(val) >= 0 and float(val) < 1:
+            return PositiveVal(val, float)
+        elif float(val) > 1 and float(val) <= 100:
+            return PositiveVal(str(float(val) * 0.01), float)
+        else:
+            raise argparse.ArgumentTypeError(
+                f"The value supplied cannot be interpreted as a percentage: {val}"
+            )
 
     # Create the argument parser
     parser = OceanParser(
@@ -198,7 +208,7 @@ def _build_parser():
     high_motion_params.add_argument("--fd_censoring", "-fc", action="store_true",
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
 
-    config_arguments.add_argument("--run_exclusion_threshold", "-re", type=PositiveInt,
+    config_arguments.add_argument("--run_exclusion_threshold", "-re", type=Percent,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
 
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
