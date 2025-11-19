@@ -1,5 +1,3 @@
-from mimetypes import suffix_map
-from librosa import ex
 from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
     SimpleInterface,
@@ -18,7 +16,7 @@ from nipype.utils.filemanip import split_filename, fname_presuffix
 
 
 class RunGLMRegressionInputSpec(BaseInterfaceInputSpec):
-    func_file = traits.File(
+    bold_file_in = traits.File(
         exists=True,
         desc="The functional data file"
     )
@@ -28,8 +26,9 @@ class RunGLMRegressionInputSpec(BaseInterfaceInputSpec):
         desc="The design matrix for the regression"
     )
 
-    tmask_file = traits.File(
-        exists=True,
+    tmask_file = traits.Union(
+        traits.File(exists=True),
+        None,
         desc="The temporal mask file",
     )
 
@@ -57,7 +56,7 @@ class RunGLMRegressionOutputSpec(TraitedSpec):
         desc=""
     )
     
-    func_residual_file = traits.File(
+    residual_bold_file = traits.File(
         exists=True,
         desc="")
 
@@ -71,9 +70,9 @@ class RunGLMRegression(SimpleInterface):
         import pandas as pd
         import numpy as np
         beta_map, func_residuals = massuni_linGLM(
-            func_data=load_data(self.inputs.func_file),
+            func_data=load_data(self.inputs.bold_file_in),
             design_matrix=pd.read_csv(self.inputs.design_matrix, sep="\t"),
-            mask=np.loadtxt(self.inputs.tmask_file),
+            mask=np.loadtxt(self.inputs.tmask_file) if self.inputs.tmask_file else None,
             stdscale=self.inputs.stdscale
         )
 
@@ -107,12 +106,12 @@ class RunGLMRegression(SimpleInterface):
 
         self._results["beta_files"] = beta_files
         self._results["beta_labels"] = beta_labels
-        self._results["func_residual_file"] = residual_filename
+        self._results["residual_bold_file"] = residual_filename
         return runtime
 
 
 class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
-    func_files = traits.Union(
+    bold_files_in = traits.Union(
         traits.List(trait=traits.File(exists=True)),
         traits.File(exists=True),
         desc="A list of functional data files"
@@ -132,7 +131,7 @@ class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
         desc="A list of nuisance matrix files"
     )
 
-    tmask_files = event_matrices = traits.Union(
+    tmask_files_in = event_matrices = traits.Union(
         traits.List(trait=traits.File(exists=True)),
         traits.File(exists=True),
         desc="A list of temporal mask files "
@@ -166,15 +165,15 @@ class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
 
 class ConcatRegressionDataOutputSpec(TraitedSpec):
 
-    func_file_out = traits.File(
+    bold_file = traits.File(
         exists=True,
         desc="")
     
-    design_file_out = traits.File(
+    design_matrix = traits.File(
         exists=True,
         desc="")
     
-    tmask_file_out = traits.File(
+    tmask_file = traits.File(
         exists=True,
         desc="")
     
@@ -197,9 +196,9 @@ class ConcatRegressionData(SimpleInterface):
         from bids.utils import listify
         from bids.layout import parse_file_entities
 
-        func_files = listify(self.inputs.func_files)
+        func_files = listify(self.inputs.bold_files_in)
         event_matrices = listify(self.inputs.event_matrices)
-        tmask_files = listify(self.inputs.tmask_files)
+        tmask_files = listify(self.inputs.tmask_files_in)
         nuisance_matrices = listify(self.nuisance_matrices)
 
         final_func_data, final_tmask, final_design_matrix, residual_design_matrix = combine_regression_data(
@@ -230,9 +229,9 @@ class ConcatRegressionData(SimpleInterface):
         final_design_file = replace_entities(file=event_matrices[0], entities=entities_base.update({"suffix":"design"}))
         final_design_matrix.to_csv(final_design_file, index=False, sep="\t")
 
-        self._results["func_file_out"] = final_func_file
-        self._results["design_file_out"] = final_design_file
-        self._results["tmask_file_out"] = final_tmask_file
+        self._results["bold_file"] = final_func_file
+        self._results["design_matrix"] = final_design_file
+        self._results["tmask_file"] = final_tmask_file
 
         if residual_design_matrix:
             residual_design_file = replace_entities(file=event_matrices[0], entities=entities_base.update({"suffix":"design", "desc":"unused"}))
@@ -262,8 +261,11 @@ def massuni_linGLM(func_data: npt.ArrayLike,
     mask: npt.ArrayLike
         Numpy array representing a mask to apply to the two other parameters
     """
-    assert mask.shape[0] == func_data.shape[0], "the mask must be the same length as the functional data"
-    assert mask.dtype == bool
+    if mask:
+        assert mask.shape[0] == func_data.shape[0], "the mask must be the same length as the functional data"
+        assert mask.dtype == bool
+    else:
+        mask = np.full(shape=(func_data.shape[0],), fill_value=True)
 
     # apply the mask to the data
     design_matrix_data = design_matrix.to_numpy()
@@ -294,57 +296,6 @@ def massuni_linGLM(func_data: npt.ArrayLike,
 
     beta_map = {c: beta_data[i] for i, c in enumerate(design_matrix.columns)}
     return (beta_map, resids)
-
-
-
-# def create_final_design(data_list: list[npt.ArrayLike],
-#                         design_list: list[tuple[pd.DataFrame, int]],
-#                         noise_list: list[pd.DataFrame] = None,
-#                         exclude_global_mean: bool = False):
-#     """
-#     Creates a final, concatenated design matrix for all functional runs in a session
-
-#     Parameters
-#     ----------
-
-#     data_list: list[npt.ArrayLike]
-#         List of numpy arrays representing BOLD data
-#     design_list: list[pd.DataFrame]
-#         List of created design matrices corresponding to each respective BOLD run in data_list
-#     noise_list: list[pd.DataFrame]
-#         List of DataFrame objects corresponding to models of noise for each respective BOLD run in data_list
-#     exclude_global_mean: bool
-#         Flag to indicate that a global mean should not be included into the final design matrix
-
-#     Returns
-#     -------
-
-#     Returns a tuple containing the final concatenated data in index 0, and the
-#     final concatenated design matrix in index 1.
-#     """
-#     num_runs = len(data_list)
-#     assert num_runs == len(design_list), "There should be the same number of design matrices and functional runs"
-
-#     design_df_list = [t[0] for t in design_list]
-#     if noise_list:
-#         assert num_runs == len(noise_list), "There should be the same number of noise matrices and functional runs"
-#         for i in range(num_runs):
-#             noise_df = noise_list[i]
-#             assert len(noise_df) == len(design_df_list[i])
-#             run_num = design_list[i][1]
-#             rename_dict = dict()
-#             for c in noise_df.columns:
-#                 if ("trend" in c) or ("mean" in c) or ("spike" in c):
-#                     rename_dict[c] = f"run-{run_num:02d}_{c}"
-#             noise_df = noise_df.rename(columns=rename_dict)
-#             noise_list[i] = noise_df
-#             design_df_list[i] = pd.concat([design_df_list[i].reset_index(drop=True), noise_df.reset_index(drop=True)], axis=1)
-
-#     final_design = pd.concat(design_df_list, axis=0, ignore_index=True).fillna(0)
-#     if not exclude_global_mean:
-#         final_design.loc[:, "global_mean"] = 1
-#     final_data = np.concat(data_list, axis=0)
-#     return (final_data, final_design)
 
 
 def combine_regression_data(func_data_list: list,
@@ -413,26 +364,3 @@ def combine_regression_data(func_data_list: list,
 
     return res_list
             
-    # design_list = []
-    # for i in range(len(event_matrices)):
-    #     event_mat = event_matrices[i]
-    #     time_axis = [len(event_mat), func_data_list[i].shape[0], tmask_list[i].shape[0]]
-    #     if not len(set(time_axis)) == 1:
-    #         raise RuntimeError(f"Grouped functional data, events matrix, and tmask must all have the same number of timepoints, but don't: {set(time_axis)}")
-    #     if nuisance_matrices:
-    #         nuisance_mat = nuisance_matrices[i]
-    #         if len(event_mat) != len(nuisance_mat):
-    #             raise RuntimeError(f"Length of the nuisance matrix ({len(nuisance_mat)}) does not match the length of the data group ({len(event_mat)})")
-    #         if regressor_columns:
-    #             nuisance_mat = nuisance_mat.loc[:, regressor_columns]
-    #         event_mat = pd.concat([event_mat.reset_index(drop=True), nuisance_mat.reset_index(drop=True)], axis=1)
-    #     design_list.append(event_mat)
-
-    # final_design = pd.concat(design_list, axis=0, ignore_index=True).fillna(0)
-    # if global_mean:
-    #     final_design.loc[:, "global_mean"] = 1
-
-    # final_data = np.concatenate(func_data_list, axis=0)
-    # final_mask = np.concatenate(tmask_list, axis=0)
-
-    # return final_data, final_design, final_mask

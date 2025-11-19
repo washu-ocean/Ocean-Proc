@@ -82,7 +82,7 @@ due to motion.
 
 
 class _MakeTmaskOutputSpec(TraitedSpec):
-    out_file = File(
+    tmask_file = File(
         exists=True,
         desc="Path to tmask (a .txt file)"
     )
@@ -110,7 +110,7 @@ class MakeTmask(SimpleInterface):
             minimum_unmasked_neighbors=self.inputs.minimum_unmasked_neighbors,
             start_censoring=self.inputs.start_censoring,
         )
-        self._results["out_file"] = output_file
+        self._results["tmask_file"] = output_file
         return runtime
 
     # def _list_outputs(self):

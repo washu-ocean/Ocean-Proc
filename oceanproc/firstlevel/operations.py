@@ -61,7 +61,7 @@ class EventsMatrixInputSpec(BaseInterfaceInputSpec):
     
 
 class EventsMatrixOutputSpec(TraitedSpec):
-    out_file = File(exists=True, 
+    events_matix = File(exists=True, 
                     desc="A run-level design matrix created using the input parameters")
     
 
@@ -85,7 +85,7 @@ class EventsMatrix(SimpleInterface):
             unmodeled=self.inputs.unmodeled,
             output_path=out_file
         )
-        self._results["out_file"] = out_file
+        self._results["events_matrix"] = out_file
         return runtime
     
     # def _list_outputs(self):

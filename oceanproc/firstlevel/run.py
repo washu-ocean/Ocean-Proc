@@ -1,6 +1,6 @@
 # from nipype import Node, Workflow, Function, MapNode
 # from nipype.pipeline.engine import Node as eNode
-# from nipype.interfaces.io import BIDSDataGrabber 
+# from nipype.interfaces.io import BIDSDataGrabber
 # from . import operations
 from nipype import config as ncfg
 # from pathlib import Path
@@ -8,9 +8,6 @@ from .parser import parse_args
 from bids.utils import listify
 # import bids
 # from bids.layout.utils import PaddedInt
-
-
-
 
 
 ncfg.update_config(
@@ -44,24 +41,24 @@ def print_me(x):
 
 def main():
 
-    work_dir="/data/sylvester/data1/users/agardr"
+    work_dir = "/data/sylvester/data1/users/agardr"
     parse_args()
     func_space = ""
     extension = ""
     from .config import all_opts
     from .workflows import build_oceanfla_wf
-    
+
     oceanfla_wf = build_oceanfla_wf(
         task=listify(all_opts.task),
         subjects=all_opts.subject,
         base_dir=work_dir
     )
-    
+
     oceanfla_wf.run()
     # space_run_info = parse_session_bold_files(
     #     layout=all_opts.preproc_layout,
     #     subject=all_opts.subject,
-    #     session=all_opts.session, 
+    #     session=all_opts.session,
     #     task=all_opts.task
     # )
 
@@ -84,8 +81,8 @@ def main():
     #         task = all_opts.task,
     #         datatype = 'func',
     #         output_query = {
-    #             'bold': { 
-    #                 'suffix': 'bold', 
+    #             'bold': {
+    #                 'suffix': 'bold',
     #                 'space': func_space,
     #                 'extension': extension,
     #             },
@@ -96,7 +93,7 @@ def main():
     #             }
     #         },
     #         load_layout=all_opts.preproc_layout._root / ".bids_indexer"
-    #     ), 
+    #     ),
     #     name="deriv_grabber"
     # )
 
@@ -149,11 +146,10 @@ def main():
     #         fir_vars = all_opts.fir_vars,
     #         unmodeled = all_opts.unmodeled
 
-    #     ), 
-    #     name="make_design", 
+    #     ),
+    #     name="make_design",
     #     iterables=["in_file"]
     # )
-    
 
     # identity_func = lambda in_file: str(in_file)
     # info_node = eNode(name="get_file",
@@ -165,7 +161,7 @@ def main():
     #                                         volumes=335,
     #                                         tr=1.2),
     #                     name="make_design")
-    
+
     # test_wf = Workflow(name="tester", base_dir=work_dir)
     # test_wf.connect(derivs_grabber, "bold", group_files_node, "bolds")
     # test_wf.connect(derivs_grabber, "confounds", group_files_node, "confounds")

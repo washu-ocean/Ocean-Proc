@@ -1,12 +1,14 @@
 from nipype import Node, Workflow, Function, MapNode
 from nipype.pipeline.engine import Node as eNode
-from nipype.interfaces.io import BIDSDataGrabber 
-from nipype.interfaces.utility import IdentityInterface
+from nipype.interfaces.io import BIDSDataGrabber
+from nipype.interfaces.utility import IdentityInterface, Merge
 from niworkflows.utils.bids import collect_participants
 from niworkflows.interfaces.bids import DerivativesDataSink
+from oceanproc.firstlevel.interfaces.clean import FilterData, PercentChange, percent_signal_change
 from oceanproc.firstlevel.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanproc.firstlevel.interfaces.regression import ConcatRegressionData, RunGLMRegression
 from oceanproc.firstlevel.interfaces.tmask import MakeTmask
+from oceanproc.firstlevel.interfaces.utility import MergeUnique
 from . import operations
 from .interfaces import *
 from nipype import config as ncfg
@@ -19,9 +21,8 @@ from . import utilities
 from bids.utils import listify
 
 
+def build_oceanfla_wf(subjects: list[str] | None, base_dir=Path | str):
 
-
-def build_oceanfla_wf(subjects:list[str]|None, base_dir=Path|str):
     tasks = all_opts.task
     wf_name = f"tasks_{'-'.join(tasks)}_wf"
     fla_wf = Workflow(name=wf_name, base_dir=base_dir)
@@ -31,7 +32,7 @@ def build_oceanfla_wf(subjects:list[str]|None, base_dir=Path|str):
         bids_dir=all_opts.preproc_layout,
         participant_label=listify(subjects)
     )
-    
+
     start_node = Node(
         IdentityInterface(
             fields=["tasks"]
@@ -42,7 +43,8 @@ def build_oceanfla_wf(subjects:list[str]|None, base_dir=Path|str):
 
     for sub in subject_list:
         sessions = all_opts.preproc_layout.get_sessions(subject=sub)
-        if len(sessions) == 0: sessions = [None]
+        if len(sessions) == 0:
+            sessions = [None]
         for ses in sessions:
             ses_wf = build_session_wf(subject=sub,
                                       session=ses,
@@ -52,11 +54,9 @@ def build_oceanfla_wf(subjects:list[str]|None, base_dir=Path|str):
                     ("task", "inputnode.task")
                 ])
             ])
-    
+
     return fla_wf
 
-    
-    
 
 def build_session_wf(subject, session=None):
 
@@ -83,7 +83,7 @@ def build_session_wf(subject, session=None):
     func_space_wf = build_func_space_wf(func_space=all_opts.func_space,
                                         run_map=space_dict["runs"],
                                         file_extension=space_dict["extension"])
-    
+
     workflow.connect([
         (input_node, func_space_wf, [
             ("subject", "inputnode.subject"),
@@ -91,13 +91,13 @@ def build_session_wf(subject, session=None):
         ])
     ])
 
-    #### only doing one functional space at a time ###### 
+    #### only doing one functional space at a time ######
 
     # for func_space, space_dict in space_run_info.items():
     #     func_space_wf = build_func_space_wf(func_space=func_space,
     #                                         run_list=space_dict["runs"],
     #                                         file_extension=space_dict["extension"])
-        
+
     #     workflow.connect([
     #         (input_node, func_space_wf, [
     #             ("subject", "inputnode.subject"),
@@ -111,9 +111,7 @@ def build_session_wf(subject, session=None):
     return workflow
 
 
-
-
-def build_func_space_wf(func_space:str, run_map:dict, file_extension:str):
+def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
     # Define the workflow and the input node for this functional space
     workflow = Workflow(name=f"space_{func_space}_wf")
@@ -128,15 +126,24 @@ def build_func_space_wf(func_space:str, run_map:dict, file_extension:str):
         name="inputnode"
     )
 
+    output_node = Node(
+        IdentityInterface(
+            fields=[
+                "beta_files",
+
+            ]
+        )
+    )
+
     # Define the data grabber nodes to find the relevant files
     derivs_grabber = Node(
         BIDSDataGrabber(
-            base_dir = all_opts.preproc_bids,
-            datatype = 'func',
-            task = all_opts.task,
-            output_query = {
-                'bold': { 
-                    'suffix': 'bold', 
+            base_dir=all_opts.preproc_bids,
+            datatype='func',
+            task=all_opts.task,
+            output_query={
+                'bold': {
+                    'suffix': 'bold',
                     'space': func_space,
                     'extension': file_extension,
                 },
@@ -147,16 +154,16 @@ def build_func_space_wf(func_space:str, run_map:dict, file_extension:str):
                 }
             },
             load_layout=all_opts.preproc_layout._root / ".bids_indexer"
-        ), 
+        ),
         name="derivs_bidssrc_node"
     )
 
     rawdata_grabber = Node(
         BIDSDataGrabber(
-            base_dir = all_opts.raw_bids,
-            datatype = 'func',
-            task = all_opts.task,
-            output_query = {
+            base_dir=all_opts.raw_bids,
+            datatype='func',
+            task=all_opts.task,
+            output_query={
                 'events': {
                     'suffix': 'events',
                     'extension': '.tsv'
@@ -181,7 +188,12 @@ def build_func_space_wf(func_space:str, run_map:dict, file_extension:str):
         ])
     ])
 
+    input_merging_node = Node(
+        MergeUnique(),
+        name="merge_run_data_node"
+    )
     # Create a run-level workflow for each run that has this functional space
+    input_num = 1
     for task in all_opts.tasks:
         run_list = run_map[task]
         for run in sorted(run_list):
@@ -192,19 +204,9 @@ def build_func_space_wf(func_space:str, run_map:dict, file_extension:str):
                 operations.ExtractTaskRunGroup,
                 name="extract_run_group_node"
             )
-            # extract_run_group_node = Node( operations.ExtractRunGroup
-            #     Function(
-            #         function=operations.extract_run_group,
-            #         input_names=["bold_list", "confounds_list", "events_list", "run_needed"],
-            #         output_names=["bold_file",
-            #                     "confounds_file",
-            #                     "events_file"]
-            #     ),
-            #     name="extract_run_group_node"
-            # )
             extract_task_run_group_node.inputs.run_needed = run
             extract_task_run_group_node.inputs.task_needed = task
-            
+
             # Connect the files to the run-level workflow
             workflow.connect([
                 (derivs_grabber, extract_task_run_group_node, [
@@ -220,23 +222,38 @@ def build_func_space_wf(func_space:str, run_map:dict, file_extension:str):
                     ("events_file", "inputnode.events_file"),
                 ])
             ])
-    
+
+            # Connect the output of the run-level workflow to the merging node
+            for out_key in run_level_wf.outputs.outputnode.get().keys():
+                workflow.connect(run_level_wf, f"outputnode.{out_key}",
+                                 input_merging_node, f"{out_key}_x{input_num}")
+
+            input_num += 1
 
     ## DO STUFF AFTER THE RUN-LEVEL WORKFLOWS ###
-    ##  * concat run-level info 
-    ##  * run session-level glm
+    # * concat run-level info
+    # * run session-level glm
+    regression_wf = build_regression_workflow(tasks=all_opts.tasks)
+
+    workflow.connect([
+        (input_merging_node, regression_wf, [
+            ("bold_file", "bold_files"),
+            ("tmask_file", "tmask_files")
+            ("design_matrix", "event_matrices"),
+            ("nuisance_matrix", "nuisance_matrices")
+        ])
+    ])
+
+    ### Datasink for user outputs ###
 
     return workflow
-
 
 
 def build_run_workflow(run, task):
     from interfaces.nuisance import make_regressor_run_specific
 
-    # Define the workflow and the inputnode
-
+    ### Define the workflow and the inputnode ###
     workflow = Workflow(name=f"task_{task}_run_{run}_processsing_wf")
-
     inputnode = Node(
         IdentityInterface(
             fields=[
@@ -245,30 +262,33 @@ def build_run_workflow(run, task):
                 "events_file",
             ]
         ),
-        name = "inputnode"
+        name="inputnode"
     )
-
     outputnode = Node(
         IdentityInterface(
             fields=[
-                "cleaned_bold",
+                "bold_file",
                 "design_matrix",
                 "nuisance_matrix",
-                "tmask",
+                "tmask_file",
             ]
         ),
-        name = "outputnode"
+        name="outputnode"
     )
 
-
-    tr_extract_func = lambda bids_file: bids_file.entities["RepetitionTime"]
+    ### Create run-level event matrix ###
+    def tr_extract_func(bids_file): return ( 
+            all_opts.repetition_time 
+                ) if all_opts.repetition_time else ( 
+            bids_file.entities["RepetitionTime"] )
+    
     extract_tr_node = Node(
         Function(
             input_names=["bids_file"],
             output_names=["tr"],
             function=tr_extract_func
         ),
-        name = "tr_extract_node"
+        name="tr_extract_node"
     )
 
     get_volumes_node = Node(
@@ -279,31 +299,33 @@ def build_run_workflow(run, task):
 
     events_matrix_node = Node(
         operations.EventsMatrix(
-            fir = all_opts.fir,
-            hrf = all_opts.hrf,
-            fir_vars = all_opts.fir_vars,
-            hrf_vars = all_opts.hrf_vars,
-            unmodeled = all_opts.unmodeled,
+            fir=all_opts.fir,
+            hrf=all_opts.hrf,
+            fir_vars=all_opts.fir_vars,
+            hrf_vars=all_opts.hrf_vars,
+            unmodeled=all_opts.unmodeled,
         ),
         name="events_matrix_node"
     )
 
+    ### Create run-level nuisance matrix ###
     nuisance_mat_node = Node(
         GenerateNuisanceMatrix(
-            confounds_columns = all_opts.confounds,
-            demean = True, # not all_opts.exclude_run_mean
-            linear_trend = True, # not all_opts.exclude_run_trend
-            spike_threshold = all_opts.fd_threshold if all_opts.spike_regression else None,
-            volterra_lag = all_opts.volterra_lag,
-            volterra_columns = all_opts.volterra_columns,
+            confounds_columns=all_opts.confounds,
+            demean=True,  # not all_opts.exclude_run_mean
+            linear_trend=True,  # not all_opts.exclude_run_trend
+            spike_threshold=all_opts.fd_threshold if all_opts.spike_regression else None,
+            volterra_lag=all_opts.volterra_lag,
+            volterra_columns=all_opts.volterra_columns,
         )
     )
 
+    ### Create run-level temporal mask ###
     tmask_node = Node(
         MakeTmask(
-            fd_threshold = all_opts.fd_threshold,
-            minimum_unmasked_neighbors = all_opts.minimum_unmasked_neighbors,
-            start_censoring = all_opts.start_censoring
+            fd_threshold=all_opts.fd_threshold,
+            minimum_unmasked_neighbors=all_opts.minimum_unmasked_neighbors,
+            start_censoring=all_opts.start_censoring
         ),
         name="make_tmask_node"
     )
@@ -314,7 +336,7 @@ def build_run_workflow(run, task):
         ]),
         (inputnode, get_volumes_node, [
             ("bold_file", "bold_in")
-        ]), 
+        ]),
         (extract_tr_node, events_matrix_node, [
             ("tr", "tr")
         ]),
@@ -331,31 +353,112 @@ def build_run_workflow(run, task):
             ("confounds_file", "confounds_file")
         ])
     ])
-
     last_func_node = inputnode
 
-
-    if all_opts.percent_change: 
+    ### Percent signal change ###
+    if all_opts.percent_change:
         # make psc node
-        pass
-    
-    # regression_columns = []
-    if all_opts.nuisance_regression:
-        regression_columns = [rc if rc not in all_opts.generic_nuisance_columns 
-                              else make_regressor_run_specific(rc, run=run, task=task) 
-                              for rc in all_opts.nuisance_regression]
-        regression_wf = build_regression_workflow(tasks=task, run=run, regression_columns=regression_columns)
-        last_func_node = regression_wf.inputs.outputnode
-        workflow.connect()
+        percent_change_node = Node(
+            PercentChange(
+                brain_mask=all_opts.brain_mask,
+            ),
+            name="percent_change_node"
+        )
 
-    
+        workflow.connect([
+            (last_func_node, percent_change_node, [
+                ("bold_file", "bold_in")
+            ]),
+            (tmask_node, percent_change_node, [
+                ("tmask_file", "tmask_in")
+            ])
+        ])
+        last_func_node = percent_change_node
+
+    ### Nuisance regression ###
+    if all_opts.nuisance_regression:
+        regression_columns = [rc if rc not in all_opts.generic_nuisance_columns
+                              else make_regressor_run_specific(rc, run=run, task=task)
+                              for rc in all_opts.nuisance_regression]
+        
+        regression_wf = build_regression_workflow(
+            tasks=task, run=run, regression_columns=regression_columns)
+
+        workflow.connect([
+            (last_func_node, regression_wf, [
+                ("bold_file", "inputnode.bold_files")
+            ]),
+            (events_matrix_node, regression_wf, [
+                ("events_matrix", "inputnode.event_matrices")
+            ]),
+            (tmask_node, regression_wf, [
+                ("tmask_file", "inputnode.tmask_files")
+            ]),
+            (nuisance_mat_node, regression_wf, [
+                ("nuisance_matrix", "inputnode.nuisance_matrices")
+            ]),
+            (regression_wf, outputnode, [
+                ("residual_design_matrix", "design_matrix"),
+            ])
+        ])
+        outputnode.inputs.nuisance_matrix = None
+        last_func_node = regression_wf.inputs.outputnode
+
+    else:
+        workflow.connect([
+            (events_matrix_node, outputnode, [
+                ("events_matrix", "design_matrix")
+            ]),
+            (nuisance_mat_node, outputnode, [
+                ("nuisance_matrix", "nuisance_matrix")
+            ])
+        ])
+
+    ### Bandpass filter ###
+    if all_opts.highpass or all_opts.lowpass:
+
+        filter_node = Node(
+            FilterData(
+                high_pass=all_opts.highpass,
+                low_pass=all_opts.lowpass,
+                padtype=all_opts.filter_padtype,
+                padlen=all_opts.filter_padlen,
+                brain_mask=all_opts.brain_mask
+            ),
+            name="filtering_node"
+        )
+
+        workflow.connect([
+            (last_func_node, filter_node, [
+                ("bold_file", "bold_in")
+            ]),
+            (tmask_node, filter_node, [
+                ("tmask_file", "tmask_in")
+            ])
+            (extract_tr_node, filter_node, [
+                ("tr", "tr")
+            ]),
+        ])
+
+        last_func_node = filter_node
+
+    ### Datasink for user outputs ###
+
+    ### Connect outputs ###
+    workflow.connect([
+        (tmask_node, outputnode, [
+            ("tmask_file", "tmask_file"),
+        ]),
+        (last_func_node, outputnode, [
+            ("bold_file", "bold_file")
+        ])
+    ])
 
     return workflow
 
 
-
 def build_regression_workflow(tasks, run=None, regression_columns=None):
-    
+
     wf_label = f"task_{'-'.join(tasks)}"
     if run:
         wf_label += f"_run_{run}"
@@ -364,21 +467,21 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
     inputnode = Node(
         IdentityInterface(
             fields=[
-                "func_files",
-                "event_mats",
+                "bold_files",
+                "event_matrices",
                 "tmask_files",
-                "nuisance_mats",
+                "nuisance_matrices",
                 "regressor_columns",
             ]
         ),
-        name = "inputnode"
+        name="inputnode"
     )
     inputnode.inputs.regressor_columns = regression_columns
 
     output_fields = [
         "beta_files",
         "beta_labels",
-        "func_file_out",
+        "bold_file",
         "design_matrix",
         "residual_design_matrix"
     ]
@@ -391,43 +494,44 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
 
     concat_data_node = Node(
         ConcatRegressionData(
-            include_global_mean=(run is None),
+            include_global_mean=((run is None) and (not all_opts.no_global_mean)),
             tasks=tasks,
-            brain_mask=all_opts.brain_mask, 
+            brain_mask=all_opts.brain_mask,
         ),
         name="concat_data_node"
     )
 
-    stdscale = (all_opts.stdscale_glm in ["both", "runlevel"] 
-                    ) if run else (
-                all_opts.stdscale_glm in ["both", "seslevel"])
+    stdscale = (all_opts.stdscale_glm in ["both", "runlevel"]
+                ) if run else (
+        all_opts.stdscale_glm in ["both", "seslevel"])
     glm_node = Node(
         RunGLMRegression(
-            stdscale = stdscale,
+            stdscale=stdscale,
             brain_mask=all_opts.brain_mask
         ),
         name="glm_regression_node"
     )
 
     workflow.connect([
-       (inputnode, concat_data_node, [
-           ("func_files", "func_files"),
-           ("event_mats", "event_matrices"),
-           ("tmask_files", "tmask_files"),
-           ("regressor_columns", "regressor_columns")
-       ]),
-       (concat_data_node, glm_node, [
-           ("func_file_out", "func_file"),
-           ("design_file_out", "design_matrix"),
-           ("tmask_file_out", "tmask_file")
-       ]),
-       (concat_data_node, outputnode, [
-           ("design_file_out", "design_matrix")
-           ("residual_design_file", "residual_design_matrix"),
-       ]),
-       (glm_node, outputnode, [
-           ("beta_files", "beta_files"),
-           ("beta_labels", "beta_labels"),
-           ("func_residual_file", "func_file_out")
-       ])
+        (inputnode, concat_data_node, [
+            ("bold_files", "bold_files_in"),
+            ("event_matrices", "event_matrices"),
+            ("tmask_files", "tmask_files_in"),
+            ("nuisance_matrices", "nuisance_matrices"),
+            ("regressor_columns", "regressor_columns")
+        ]),
+        (concat_data_node, glm_node, [
+            ("bold_file", "func_file"),
+            ("design_matrix", "design_matrix"),
+            ("tmask_file", "tmask_file")
+        ]),
+        (concat_data_node, outputnode, [
+            ("design_matrix", "design_matrix")
+            ("residual_design_matrix", "residual_design_matrix"),
+        ]),
+        (glm_node, outputnode, [
+            ("beta_files", "beta_files"),
+            ("beta_labels", "beta_labels"),
+            ("residual_bold_file", "bold_file")
+        ])
     ])
