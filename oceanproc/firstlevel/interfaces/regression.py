@@ -207,12 +207,19 @@ class ConcatRegressionData(SimpleInterface):
         tmask_files = listify(self.inputs.tmask_files_in)
         nuisance_matrices = listify(self.nuisance_matrices)
 
-        for i, include in enumerate(listify(self.inputs.include_in_glm)):
+        idx = 0
+        for include in listify(self.inputs.include_in_glm):
             if not include:
-                func_files.pop(i)
-                event_matrices.pop(i)
-                tmask_files.pop(i)
-                nuisance_matrices.pop(i)
+                func_files.pop(idx)
+                event_matrices.pop(idx)
+                tmask_files.pop(idx)
+                nuisance_matrices.pop(idx)
+            else:
+                idx += 1
+        del idx
+
+        if len(func_files) == 0:
+            raise ValueError("No BOLD runs remain after filtering by exclusion criteria.")
             
 
         final_func_data, final_tmask, final_design_matrix, residual_design_matrix = combine_regression_data(

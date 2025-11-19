@@ -13,6 +13,10 @@ from nipype.interfaces.base import (
 )
 from bids.utils import listify
 
+class MergeUniqueInputSpec(MergeInputSpec):
+    
+
+
 class MergeUniqueOutputSpec(DynamicTraitedSpec):
     pass
 
