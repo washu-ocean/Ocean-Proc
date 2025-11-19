@@ -41,7 +41,7 @@ def print_me(x):
 
 def main():
 
-    work_dir = "/data/sylvester/data1/users/agardr"
+    work_dir = "/Users/agardr/Desktop/python_code/test_bids_data/work"
     parse_args()
     func_space = ""
     extension = ""
@@ -49,7 +49,6 @@ def main():
     from .workflows import build_oceanfla_wf
 
     oceanfla_wf = build_oceanfla_wf(
-        task=listify(all_opts.task),
         subjects=all_opts.subject,
         base_dir=work_dir
     )

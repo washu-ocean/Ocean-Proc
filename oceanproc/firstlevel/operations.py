@@ -61,7 +61,7 @@ class EventsMatrixInputSpec(BaseInterfaceInputSpec):
     
 
 class EventsMatrixOutputSpec(TraitedSpec):
-    events_matix = File(exists=True, 
+    events_matrix = File(exists=True, 
                     desc="A run-level design matrix created using the input parameters")
     
 
@@ -321,7 +321,7 @@ def _extract_task_run_group(bold_list:list, confounds_list:list, events_list:lis
 
 ExtractTaskRunGroup = Function(
     function=_extract_task_run_group,
-    input_names=["bold_list", "confounds_list", "events_list", "run_needed"],
+    input_names=["bold_list", "confounds_list", "events_list", "task_needed", "run_needed"],
     output_names=["bold_file",
                 "confounds_file",
                 "events_file"]

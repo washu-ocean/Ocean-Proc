@@ -111,11 +111,11 @@ def _build_parser():
     config_arguments = parser.add_argument_group(
         "Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
 
-    config_arguments.add_argument("--task", "-t", required=True,
+    config_arguments.add_argument("--task", "-t", nargs="+", required=True,
                                   help="The name of the task to analyze.")
 
-    config_arguments.add_argument("--bold_file_type", "-ft", required=True,
-                                  help="The file type of the functional runs to use.")
+    # config_arguments.add_argument("--bold_file_type", "-ft", required=True,
+    #                               help="The file type of the functional runs to use.")
 
     config_arguments.add_argument("--brain_mask", "-bm", type=ExistingFile,
                                   help="If the bold file type is volumetric data, a brain mask must also be supplied.")
@@ -175,7 +175,7 @@ def _build_parser():
     config_arguments.add_argument("--fd_threshold", "-fd", type=PositiveFloat, default=0.9,
                                   help="The framewise displacement threshold used when censoring high-motion frames")
 
-    config_arguments.add_argument("--minimum_unmasked_neighbors", type=PositiveInt, default=None,
+    config_arguments.add_argument("--minimum_unmasked_neighbors", "-mun", type=PositiveInt, default=None,
                                   help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
 
     config_arguments.add_argument("--tmask", action=argparse.BooleanOptionalAction,
@@ -187,6 +187,9 @@ def _build_parser():
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
                                   help="""Flag to demean and detrend the data before modeling. The default is to include 
                                   a mean and trend line into the nuisance matrix instead.""")
+    
+    config_arguments.add_argument("--percent_change", "-pc", action="store_true",
+                                  help="""Flag to convert data to percent signal change.""")
 
     config_arguments.add_argument("--no_global_mean", action="store_true",
                                   help="Flag to indicate that you do not want to include a global mean into the model.")
@@ -261,20 +264,20 @@ def parse_args():
             parser.error(
                 "The 'custom_hrf' argument must be a file of type '.txt' and must exist")
 
-    if args.bold_file_type[0] != ".":
-        args.bold_file_type = "." + args.bold_file_type
-    if args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz":
-        args.imagetype = "nifti"
-    else:
-        args.imagetype = "cifti"
+    # if args.bold_file_type[0] != ".":
+    #     args.bold_file_type = "." + args.bold_file_type
+    # if args.bold_file_type == ".nii" or args.bold_file_type == ".nii.gz":
+    #     args.imagetype = "nifti"
+    # else:
+    #     args.imagetype = "cifti"
 
     if args.parcellate:
         if (not args.parcellate.exists()) or (not args.parcellate.name.endswith(".dlabel.nii")):
             parser.error(
                 "The 'parcellate' argument must be a file of type '.dlabel.nii' and must exist")
 
-    flags.parcellated = (
-        args.parcellate or args.bold_file_type == ".ptseries.nii")
+    # flags.parcellated = (
+    #     args.parcellate or args.bold_file_type == ".ptseries.nii")
 
     if (args.volterra_lag and not args.volterra_columns) or (not args.volterra_lag and args.volterra_columns):
         parser.error(
@@ -298,25 +301,20 @@ def parse_args():
                                           database_path=args.preproc_bids / ".bids_indexer",
                                           reset_database=True,
                                           validate=False,
-                                          absolute_paths=True)
+                                          absolute_paths=True,
+                                          is_derivative=True)
 
-    # try:
-    #     assert args.derivs_dir.is_dir(), "Derivatives directory must exist but is not found"
-    #     assert args.raw_bids.is_dir(), "Raw data directory must exist but is not found"
-    # except AssertionError as e:
-    #     logger.exception(e)
-    #     exit_program_early(e)
-
+  
     # Export the current arguments to a file
-    # if args.export_args:
-    #     try:
-    #         assert args.export_args.is_file(), "Argument export path must be a file path in a directory that exists"
-    #         log_linebreak()
-    #         logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
-    #         export_args_to_file(args, config_arguments, args.export_args)
-    #     except Exception as e:
-    #         logger.exception(e)
-    #         exit_program_early(e)
+    if args.export_args:
+        try:
+            assert args.export_args.parent.is_dir(), "Argument export path must be a file path in a directory that exists"
+            log_linebreak()
+            logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######\n")
+            export_args_to_file(args, config_arguments, args.export_args)
+        except Exception as e:
+            logger.exception(e)
+            exit_program_early(e)
 
     args.custom_desc = f"-{args.custom_desc}" if args.custom_desc else ""
     args.file_name_base = f"sub-{args.subject}_ses-{args.session}_task-{args.task}"

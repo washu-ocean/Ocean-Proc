@@ -63,7 +63,7 @@ def is_nifti_file(file: str|Path) -> str|None:
     return suffix[0] if (len(suffix) > 0) and not_cifti else None
 
 
-def create_image_like(data: np.ArrayLike,
+def create_image_like(data: np.ndarray,
                  source_header,
                  out_file: str|Path,
                  dscalar_axis:list[str] = None,
