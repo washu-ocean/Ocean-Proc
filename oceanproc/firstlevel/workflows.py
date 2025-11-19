@@ -271,6 +271,7 @@ def build_run_workflow(run, task):
                 "design_matrix",
                 "nuisance_matrix",
                 "tmask_file",
+                "include_in_glm"
             ]
         ),
         name="outputnode"
@@ -441,13 +442,13 @@ def build_run_workflow(run, task):
         ])
 
         last_func_node = filter_node
-
     ### Datasink for user outputs ###
 
     ### Connect outputs ###
     workflow.connect([
         (tmask_node, outputnode, [
             ("tmask_file", "tmask_file"),
+            ("meets_tmask_criteria", "include_in_glm")
         ]),
         (last_func_node, outputnode, [
             ("bold_file", "bold_file")
@@ -471,6 +472,7 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
                 "event_matrices",
                 "tmask_files",
                 "nuisance_matrices",
+                "include_in_glm",
                 "regressor_columns",
             ]
         ),
@@ -518,7 +520,8 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
             ("event_matrices", "event_matrices"),
             ("tmask_files", "tmask_files_in"),
             ("nuisance_matrices", "nuisance_matrices"),
-            ("regressor_columns", "regressor_columns")
+            ("regressor_columns", "regressor_columns"),
+            ("include_in_glm", "include_in_glm")
         ]),
         (concat_data_node, glm_node, [
             ("bold_file", "func_file"),

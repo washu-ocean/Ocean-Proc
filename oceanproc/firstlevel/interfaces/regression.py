@@ -137,6 +137,12 @@ class ConcatRegressionDataInputSpec(BaseInterfaceInputSpec):
         desc="A list of temporal mask files "
     )
 
+    include_in_glm = traits.Union(
+        traits.List(trait=traits.Bool),
+        traits.Bool,
+        desc="List of Bool that denotes whether a run should be included in the concatenated GLM or not."
+    )
+
     regressor_columns = traits.Union(
         traits.List(trait=traits.Str),
         None,
@@ -200,6 +206,14 @@ class ConcatRegressionData(SimpleInterface):
         event_matrices = listify(self.inputs.event_matrices)
         tmask_files = listify(self.inputs.tmask_files_in)
         nuisance_matrices = listify(self.nuisance_matrices)
+
+        for i, include in enumerate(listify(self.inputs.include_in_glm)):
+            if not include:
+                func_files.pop(i)
+                event_matrices.pop(i)
+                tmask_files.pop(i)
+                nuisance_matrices.pop(i)
+            
 
         final_func_data, final_tmask, final_design_matrix, residual_design_matrix = combine_regression_data(
             func_data_list= [load_data(f) for f in func_files],
