@@ -18,7 +18,8 @@ def make_tmask(in_file: Path | str,
                out_file: Path | str,
                fd_threshold: int,
                minimum_unmasked_neighbors: int,
-               start_censoring: int):
+               start_censoring: int,
+               minimum_retained_percent: float = 0.0) -> bool:
     if start_censoring < 0:
         raise ValueError("The 'start_censoring' argument of make_tmask() must be 0 or positive.")
     if minimum_unmasked_neighbors < 0:
@@ -52,7 +53,10 @@ def make_tmask(in_file: Path | str,
     fd_mask[:start_censoring] = False
     # print(fd_mask)
     np.savetxt(out_file, fd_mask)
-
+    if minimum_retained_percent > 0:
+        if len(fd_mask[fd_mask]) / len(fd_mask) < minimum_retained_percent:
+            return False
+    return True
 
 class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
     confounds_file = File(
@@ -79,12 +83,20 @@ due to motion.
         0,
         desc="Number of frames to censor out automatically at the beginning of each run."
     )
+    minimum_retained_percent = traits.Float(
+        0.0,
+        desc="Percent (expressed as float between 0 and 1) of frames that must be retained in order for 'meets_tmask_criteria' to be True."
+    )
 
 
 class _MakeTmaskOutputSpec(TraitedSpec):
     tmask_file = File(
         exists=True,
         desc="Path to tmask (a .txt file)"
+    )
+    meets_tmask_criteria = traits.Bool(
+        True,
+        desc="Is True if enough of the run has FD below the threshold specified by 'minimum_retained_percent'."
     )
 
 
@@ -94,7 +106,8 @@ class MakeTmask(SimpleInterface):
 
     def _run_interface(self, runtime):
         from ..utilities import replace_entities
-
+        if not (self.inputs.minimum_retained_percent >= 0 and self.inputs.minimum_retained_percent <= 1):
+            raise ValueError("The value of 'minimum_retained_percent' must be between 0 and 1.")
         output_file = replace_entities(
             file=self.inputs.confounds_file, 
             entities={
@@ -103,7 +116,7 @@ class MakeTmask(SimpleInterface):
                 "ext": ".txt",
                 "path": runtime.cwd
         })
-        make_tmask(
+        self._results["meets_tmask_criteria"] = make_tmask(
             in_file=self.inputs.confounds_file,
             out_file=output_file,
             fd_threshold=self.inputs.fd_threshold,
