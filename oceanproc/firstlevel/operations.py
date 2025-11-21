@@ -117,15 +117,15 @@ def make_design_matrix(event_file: str | Path,
         residual_conditions = [
             c for c in residual_conditions if c not in fir_conditions]
 
-        col_names = {c: c + "_00" for c in fir_conditions}
+        col_names = {c: c + "00" for c in fir_conditions}
         events_matrix = events_matrix.rename(columns=col_names)
         fir_cols_to_add = dict()
         for c in fir_conditions:
             for i in range(1, fir):
-                fir_cols_to_add[f"{c}_{i:02d}"] = np.array(
+                fir_cols_to_add[f"{c}{i:02d}"] = np.array(
                     np.roll(events_matrix.loc[:, col_names[c]], shift=i, axis=0))
                 # so events do not roll back around to the beginnin
-                fir_cols_to_add[f"{c}_{i:02d}"][:i] = 0
+                fir_cols_to_add[f"{c}{i:02d}"][:i] = 0
         events_matrix = pd.concat([events_matrix, pd.DataFrame(
             fir_cols_to_add, index=events_matrix.index)], axis=1)
         events_matrix = events_matrix.astype(int)

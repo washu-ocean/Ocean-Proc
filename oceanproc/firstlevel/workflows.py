@@ -1,4 +1,4 @@
-from nipype import Node, Workflow, Function
+from nipype import Node, Workflow, Function, MapNode
 from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface
 from niworkflows.utils.bids import collect_participants
@@ -191,6 +191,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     )
     # Create a run-level workflow for each run that has this functional space
     input_num = 1
+    # source_node = None
     for task, run_list in run_map.items():
         for run in run_list:
             run_level_wf = build_run_workflow(run, task)
@@ -203,6 +204,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
                 ),
                 name=f"extract_task_{task}_run_{run}_group_node"
             )
+            # if source_node is None:
+            #     source_node = extract_task_run_group_node
 
             # Connect the files to the run-level workflow
             workflow.connect([
@@ -242,6 +245,30 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     ])
 
     ### Datasink for user outputs ###
+    need_compress = file_extension.endswith(".gz")
+    ds_beta_weights = Node(
+        DerivativesDataSink(
+            base_directory = all_opts.output_dir,
+            compress = need_compress,
+            dismiss_entities = ["desc", "run"],
+            suffix = "boldmap",
+            stat = "effect",
+            task = "-".join(run_map.keys()),
+            allowed_entities=("condition", "stat")
+        ),
+        name=f"ds_{func_space}_beta_weights"
+    )
+
+    workflow.connect([
+        (regression_wf, ds_beta_weights, [
+            ("outputnode.beta_files", "in_file"),
+            ("outputnode.beta_labels", "condition")
+        ]),
+        (derivs_grabber, ds_beta_weights, [
+            ("bold", "source_file")
+        ])
+    ])
+
 
     return workflow
 
@@ -444,6 +471,8 @@ def build_run_workflow(run, task):
         last_func_node = filter_node
 
     ### Datasink for user outputs ###
+
+    
 
     ### Connect outputs ###
     workflow.connect([

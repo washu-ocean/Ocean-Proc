@@ -320,9 +320,10 @@ def parse_args():
     args.file_name_base = f"sub-{args.subject}_ses-{args.session}_task-{args.task}"
 
     if not hasattr(args, "output_dir") or args.output_dir is None:
-        args.output_dir = args.derivs_dir / \
-            f"{args.derivs_subfolder}/sub-{args.subject}/ses-{args.session}/func"
-
+        # args.output_dir = args.derivs_dir / f"{args.derivs_subfolder}/sub-{args.subject}/ses-{args.session}/func"
+        args.output_dir = args.derivs_dir / args.derivs_subfolder
+        # args.output_dir.mkdir(exist_ok = True)
+    
     '''
     TODO: create singleton options class so arguments are passed to each process
     '''

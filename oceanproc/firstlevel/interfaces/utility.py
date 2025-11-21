@@ -27,8 +27,6 @@ class MergeUnique(IOBase):
             return outputs
         max_index = max([int(t[1])
                         for t in input_keys if t[0] in input_key_name_set])
-        print(input_key_name_set)
-        print(max_index)
         for input_key in input_key_name_set:
             out = []
             values = [getattr(self.inputs, f"{input_key}{self._sep}{idx}")
@@ -47,7 +45,6 @@ class MergeUnique(IOBase):
                 out = [[val[i] for val in lists] for i in range(len(lists[0]))]
             if all([o is None for o in out]):
                 out = None
-            print(out)
             outputs[input_key] = out
         return outputs
 
