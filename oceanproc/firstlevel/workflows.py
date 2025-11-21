@@ -1,22 +1,15 @@
-from nipype import Node, Workflow, Function, MapNode
-from nipype.pipeline.engine import Node as eNode
+from nipype import Node, Workflow, Function
 from nipype.interfaces.io import BIDSDataGrabber
-from oceanproc.firstlevel.interfaces.utility import BidsDataGrabberExt
-from nipype.interfaces.utility import IdentityInterface, Merge
+from nipype.interfaces.utility import IdentityInterface
 from niworkflows.utils.bids import collect_participants
 from niworkflows.interfaces.bids import DerivativesDataSink
-from oceanproc.firstlevel.interfaces.clean import FilterData, PercentChange, percent_signal_change
+from oceanproc.firstlevel.interfaces.clean import FilterData, PercentChange
 from oceanproc.firstlevel.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanproc.firstlevel.interfaces.regression import ConcatRegressionData, RunGLMRegression
 from oceanproc.firstlevel.interfaces.tmask import MakeTmask
-from oceanproc.firstlevel.interfaces.utility import MergeUnique
+from oceanproc.firstlevel.interfaces.utility import MergeUnique, ExtractDataGroup
 from . import operations
-from .interfaces import *
-from nipype import config as ncfg
 from pathlib import Path
-# from .config import Options
-# from bids.layout import BIDSFile
-from bids.layout.utils import PaddedInt
 from .config import all_opts
 from . import utilities
 from bids.utils import listify
@@ -97,7 +90,7 @@ def build_session_wf(subject, session=None):
 
     # for func_space, space_dict in space_run_info.items():
     #     func_space_wf = build_func_space_wf(func_space=func_space,
-    #                                         run_list=space_dict["runs"],
+    #                                         run_map=space_dict["runs"],
     #                                         file_extension=space_dict["extension"])
 
     #     workflow.connect([
@@ -141,9 +134,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
     # Define the data grabber nodes to find the relevant files
     derivs_grabber = Node(
-        BidsDataGrabberExt(
+        BIDSDataGrabber(
             base_dir=all_opts.preproc_bids,
-            is_derivative = True,
             datatype='func',
             # task=all_opts.task,
             output_query={
@@ -164,7 +156,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     )
 
     rawdata_grabber = Node(
-        BidsDataGrabberExt(
+        BIDSDataGrabber(
             base_dir=all_opts.raw_bids,
             datatype='func',
             # task=all_opts.task,
@@ -199,18 +191,18 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     )
     # Create a run-level workflow for each run that has this functional space
     input_num = 1
-    for task in all_opts.task:
-        run_list = run_map[task]
-        for run in sorted(run_list):
-            run_level_wf = build_run_workflow(run=run, task=task)
+    for task, run_list in run_map.items():
+        for run in run_list:
+            run_level_wf = build_run_workflow(run, task)
 
             # Define a node to extract the run-specific files from the data-grabbers
             extract_task_run_group_node = Node(
-                operations.ExtractTaskRunGroup,
+                ExtractDataGroup(
+                    task=task,
+                    run=run
+                ),
                 name=f"extract_task_{task}_run_{run}_group_node"
             )
-            extract_task_run_group_node.inputs.run_needed = run
-            extract_task_run_group_node.inputs.task_needed = task
 
             # Connect the files to the run-level workflow
             workflow.connect([
@@ -282,13 +274,16 @@ def build_run_workflow(run, task):
     )
 
     ### Create run-level event matrix ###
-    def tr_extract_func(bids_file, known_tr = None): 
-        tr_to_return = known_tr if known_tr is not None else bids_file.entities["RepetitionTime"]
-        return tr_to_return
+    def tr_extract_func(file, known_tr=None):
+        if known_tr:
+            return known_tr
+        else:
+            from oceanproc.firstlevel.config import get_bids_file
+            return get_bids_file(file).entities["RepetitionTime"]
 
     extract_tr_node = Node(
         Function(
-            input_names=["bids_file", "known_tr"],
+            input_names=["file", "known_tr"],
             output_names=["tr"],
             function=tr_extract_func
         ),
@@ -338,7 +333,7 @@ def build_run_workflow(run, task):
 
     workflow.connect([
         (inputnode, extract_tr_node, [
-            ("bold_file", "bids_file")
+            ("bold_file", "file")
         ]),
         (inputnode, get_volumes_node, [
             ("bold_file", "bold_in")
@@ -465,6 +460,7 @@ def build_run_workflow(run, task):
 
 def build_regression_workflow(tasks, run=None, regression_columns=None):
 
+    tasks = listify(tasks)
     wf_label = f"task_{'-'.join(tasks)}"
     if run:
         wf_label += f"_run_{run}"
@@ -543,7 +539,8 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
     ])
 
     if all_opts.fd_censoring:
-        workflow.connect(inputnode, "tmask_files", concat_data_node, "tmask_files_in")
+        workflow.connect(inputnode, "tmask_files",
+                         concat_data_node, "tmask_files_in")
     else:
         concat_data_node.inputs.tmask_files_in = None
 

@@ -8,10 +8,6 @@ from nipype.interfaces.base import (
 )
 import numpy as np
 import numpy.typing as npt
-from nilearn.signal import (
-    butterworth,
-    _handle_scrubbed_volumes
-)
 from ..utilities import load_data, create_image_like
 from nipype.utils.filemanip import split_filename, fname_presuffix
 
@@ -68,28 +64,18 @@ class FilterData(SimpleInterface):
     output_spec = _FilterDataOutputSpec
 
     def _run_interface(self, runtime):
-        from ..utilities import replace_entities
-        import numpy as np
 
-        mask = np.loadtxt(self.inputs.tmask_in).astype(bool)
-        filtered_fdata = filter_data(
-            func_data=load_data(self.inputs.bold_in, self.inputs.brain_mask),
-            mask=mask,
+        self._results["bold_file"] = filter_data(
+            func_file=self.inputs.bold_in,
+            tmask_file=self.inputs.tmask_in,
             tr=self.inputs.tr,
             low_pass=self.inputs.low_pass,
             high_pass=self.inputs.high_pass,
             padtype=self.inputs.padtype,
-            padlen=self.inputs.padlen
+            padlen=self.inputs.padlen,
+            brain_mask=self.inputs.brain_mask
         )
-        out_path = replace_entities(
-            file=self.inputs.bold_in,
-            entities={"desc": "filtered", "path": runtime.cwd}
-        )
-        create_image_like(data=filtered_fdata,
-                          source_header=self.inputs.bold_in,
-                          out_file=out_path,
-                          brain_mask=self.inputs.brain_mask)
-        self._results["bold_file"] = out_path
+
         return runtime
 
     # def _list_outputs(self):
@@ -123,32 +109,31 @@ class PercentChange(SimpleInterface):
     output_spec = PercentChangeOutputSpec
 
     def _run_interface(self, runtime):
-        from ..utilities import replace_entities
-        mask = np.loadtxt(self.inputs.tmask_in).astype(bool)
-        psc_data = percent_signal_change(
-            data=load_data(self.inputs.bold_in, self.inputs.brain_mask),
-            mask=mask
+
+        self._results["bold_file"] = percent_signal_change(
+            func_file=self.inputs.bold_in,
+            tmask_file=self.inputs.tmask_in,
+            brain_mask=self.inputs.brain_mask
         )
 
-        out_path = replace_entities(
-            file=self.inputs.bold_in,
-            entities={"desc": "percent-change", "path": runtime.cwd}
-        )
-        create_image_like(data=psc_data,
-                          source_header=self.inputs.bold_in,
-                          out_file=out_path,
-                          brain_mask=self.inputs.brain_mask)
-        self._results["bold_file"] = out_path
         return runtime
 
 
-def filter_data(func_data: npt.ArrayLike,
-                mask: npt.ArrayLike,
+def filter_data(func_file: str,
+                tmask_file: str,
                 tr: float,
                 low_pass: float = 0.1,
                 high_pass: float = 0.008,
                 padtype: str = "mean",
-                padlen: int = 50):
+                padlen: int = 50,
+                brain_mask: str = None):
+    from nilearn.signal import butterworth, _handle_scrubbed_volumes
+    from ..utilities import replace_entities
+    import numpy as np
+
+    mask = np.loadtxt(tmask_file).astype(bool)
+    func_data = load_data(func_file, brain_mask)
+
     if not any((
         padtype == "none",
         padlen is None,
@@ -202,10 +187,28 @@ def filter_data(func_data: npt.ArrayLike,
     )[padlen:-padlen, :]  # remove 0-pad frames on both sides
 
     assert filtered_data.shape[0] == func_data.shape[0], "Filtered data must have the same number of timepoints as the original functional data"
-    return filtered_data
+
+    # save data out
+    out_path = replace_entities(
+        file=func_file,
+        entities={"suffix": "filtered-bold", "path": None}
+    )
+    create_image_like(data=filtered_data,
+                      source_header=func_file,
+                      out_file=out_path,
+                      brain_mask=brain_mask)
+
+    return out_path
 
 
-def percent_signal_change(data: npt.ArrayLike, mask: npt.ArrayLike):
+def percent_signal_change(func_file: str,
+                          tmask_file: str,
+                          brain_mask: str = None):
+    from ..utilities import replace_entities
+
+    mask = np.loadtxt(tmask_file).astype(bool)
+    data = load_data(func_file, brain_mask)
+
     masked_data = data[mask, :]
     mean = np.nanmean(masked_data, axis=0)
     mean = np.repeat(mean[np.newaxis, :], data.shape[0], axis=0)
@@ -214,4 +217,14 @@ def percent_signal_change(data: npt.ArrayLike, mask: npt.ArrayLike):
     if len(non_valid_indices[0]) > 0:
         # logger.warning("Found vertices with zero signal, setting these to zero")
         psc_data[np.where(~np.isfinite(psc_data))] = 0
-    return psc_data
+
+    out_path = replace_entities(
+        file=func_file,
+        entities={"suffix": "percent-change-bold", "path": None}
+    )
+    create_image_like(data=psc_data,
+                      source_header=func_file,
+                      out_file=out_path,
+                      brain_mask=brain_mask)
+
+    return out_path

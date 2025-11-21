@@ -1,24 +1,11 @@
-# from nipype import Node, Workflow, Function, MapNode
-# from nipype.pipeline.engine import Node as eNode
-# from nipype.interfaces.io import BIDSDataGrabber
-import pandas as pd
-import numpy as np
 from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
     File,
-    InputMultiObject,
-    OutputMultiObject,
     SimpleInterface,
     TraitedSpec,
-    isdefined,
     traits,
 )
-# from . import operations
-# from nipype import config as ncfg
 from pathlib import Path
-# from parser import parse_args
-# from config import all_opts
-from nipype.utils.filemanip import split_filename, fname_presuffix
 
 
 class _GenerateNuisanceMatrixInputSpec(BaseInterfaceInputSpec):
@@ -50,8 +37,8 @@ class _GenerateNuisanceMatrixInputSpec(BaseInterfaceInputSpec):
 
 
 class _GenerateNuisanceMatrixOutputSpec(TraitedSpec):
-    nuisance_matrix = OutputMultiObject(
-        File(exists=True),
+    nuisance_matrix = File(
+        exists=True,
         desc="Outputted nuisance matrix as a file."
     )
 
@@ -65,21 +52,16 @@ class GenerateNuisanceMatrix(SimpleInterface):
     output_spec = _GenerateNuisanceMatrixOutputSpec
 
     def _run_interface(self, runtime):
-        from ..utilities import replace_entities
-
-        out_file = replace_entities(self.inputs.confounds_file, 
-                                    {"desc":"nuisance", "suffix":"matrix", "ext":".csv", "path":runtime.cwd})
-        generate_nuisance_matrix(
+        
+        self._results["nuisance_matrix"] = generate_nuisance_matrix(
             confounds_file=self.inputs.confounds_file,
             confounds_columns=self.inputs.confounds_columns,
-            output_path=out_file,
             demean=self.inputs.demean,
             linear_trend=self.inputs.linear_trend,
             spike_threshold=self.inputs.spike_threshold,
             volterra_lag=self.inputs.volterra_lag,
             volterra_columns=self.inputs.volterra_columns
         )
-        self._results["nuisance_matrix"] = out_file
         return runtime
 
     # def _list_outputs(self):
@@ -88,12 +70,14 @@ class GenerateNuisanceMatrix(SimpleInterface):
 
 def generate_nuisance_matrix(confounds_file: str,
                              confounds_columns: list,
-                             output_path: str | Path,
                              demean: bool = False,
                              linear_trend: bool = False,
                              spike_threshold: float = None,
                              volterra_lag: int = None,
                              volterra_columns: list = None,):
+    from ..utilities import replace_entities
+    import pandas as pd
+    import numpy as np
     
     confounds_columns = set(confounds_columns)
     if spike_threshold:
@@ -113,26 +97,23 @@ def generate_nuisance_matrix(confounds_file: str,
             b = 0
             for a in range(len(nuisance)):
                 if nuisance.loc[a, "framewise_displacement"] > spike_threshold:
-                    spike_col = make_regressor_run_specific(confounds_file, f"spike{b}")
+                    spike_col = make_regressor_run_specific(f"spike{b}", bids_source_file=confounds_file)
                     nuisance[spike_col] = 0
                     nuisance.loc[a, spike_col] = 1
                     b += 1
     if demean:
-        nuisance[make_regressor_run_specific(confounds_file, "mean")] = 1
+        nuisance[make_regressor_run_specific("mean", bids_source_file=confounds_file)] = 1
     if linear_trend:
-        nuisance[make_regressor_run_specific(confounds_file, "trend")] = np.arange(0, len(nuisance))
+        nuisance[make_regressor_run_specific("trend", bids_source_file=confounds_file)] = np.arange(0, len(nuisance))
     if volterra_columns and volterra_lag:
         for vc in volterra_columns:
             for lag in range(volterra_lag):
                 nuisance.loc[:, f"{vc}_{lag + 1}"] = nuisance.loc[:, vc].shift(lag + 1)
         nuisance.fillna(0, inplace=True)
 
-    if str(output_path).endswith(".tsv"):
-        nuisance.to_csv(output_path, sep='\t', index=False)
-        return output_path
-    elif str(output_path).endswith(".csv"):
-        nuisance.to_csv(output_path, index=False)
-        return 
+    out_file = replace_entities(confounds_file, {"suffix":"nuisance-matrix", "ext":".tsv", "path":None})
+    nuisance.to_csv(out_file, sep="\t", index=False)
+    return out_file
     
 
 

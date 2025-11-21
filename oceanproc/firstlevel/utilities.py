@@ -36,9 +36,12 @@ def parse_session_bold_files(layout:bids.BIDSLayout, subject:str, session:str, t
     return space_run_dict
 
 
-def load_data(func_file: bids.layout.BIDSFile,
+def load_data(func_file: str|Path|bids.layout.BIDSFile,
               brain_mask: str|Path) -> np.ndarray:
-    func_file = str(func_file.path)
+    if isinstance(func_file, bids.layout.BIDSFile):
+        func_file = str(func_file.path)
+    elif not isinstance(func_file, str):
+        func_file = str(func_file)
     img = nib.load(func_file)
     if is_cifti_file(func_file):
         return img.get_fdata()
@@ -90,6 +93,7 @@ def create_image_like(data: np.ndarray,
     return    
 
 def replace_entities(file:str, entities:dict):
+    
     for entity, value in entities.items():
         file = replace_entity(file, entity, value)
     return file
@@ -107,7 +111,7 @@ def replace_entity(file:str, entity:str, value:str):
     if entity == "path":
         fname=Path(file).name
         if not value:
-            return fname
+            return str(Path().resolve()/fname)
         else:
             return f"{value}/{fname}"
     
@@ -118,3 +122,5 @@ def replace_entity(file:str, entity:str, value:str):
         if value is None:
             return f"{prefix}_{suffix}"
         return f"{prefix}{entity_label}{value}_{suffix}"
+
+    return file

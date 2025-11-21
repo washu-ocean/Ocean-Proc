@@ -1,38 +1,30 @@
 from pathlib import Path
-from copy import deepcopy
 from nipype.interfaces.base import (
     BaseInterfaceInputSpec,
     File,
-    OutputMultiObject,
     SimpleInterface,
     TraitedSpec,
     traits,
 )
-import numpy as np
-import numpy.typing as npt
-import nibabel as nib
-from nipype.utils.filemanip import split_filename, fname_presuffix
 
 
-def make_tmask(in_file: Path | str,
-               out_file: Path | str,
+def make_tmask(confounds_file: Path | str,
                fd_threshold: int,
                minimum_unmasked_neighbors: int,
                start_censoring: int):
+    from ..utilities import replace_entities
+    import pandas as pd
+    import numpy as np
+
     if start_censoring < 0:
         raise ValueError("The 'start_censoring' argument of make_tmask() must be 0 or positive.")
     if minimum_unmasked_neighbors < 0:
         raise ValueError("The 'minimum_unmasked_neighbors' argument of make_tmask() must be 0 or positive.")
     if fd_threshold < 0:
         raise ValueError("The 'fd_threshold' argument of make_tmask() must be 0 or positive.")
-    import pandas as pd
-    df = None
-    if str(in_file).endswith(".csv"):
-        df = pd.read_csv(in_file)
-    elif str(in_file).endswith(".tsv"):
-        df = pd.read_csv(in_file, sep="\t")
-    else:
-        raise RuntimeError("The 'in_file' argument of make_tmask() must end in .csv or .tsv.")
+
+    df = pd.read_csv(confounds_file, sep="\t")
+
     fd_arr = df.loc[:, "framewise_displacement"].to_numpy()
     if minimum_unmasked_neighbors > 0:
         fd_arr_padded = np.pad(fd_arr, pad_width := minimum_unmasked_neighbors)
@@ -50,8 +42,17 @@ def make_tmask(in_file: Path | str,
     else:
         fd_mask = fd_arr < fd_threshold
     fd_mask[:start_censoring] = False
-    # print(fd_mask)
+
+    out_file = replace_entities(
+            file=confounds_file, 
+            entities={
+                "suffix": f"{str(fd_threshold).replace('.', 'p')}mm-tmask", 
+                "ext": ".txt",
+                "path": None
+        })
+    
     np.savetxt(out_file, fd_mask)
+    return out_file
 
 
 class _MakeTmaskInputSpec(BaseInterfaceInputSpec):
@@ -93,24 +94,14 @@ class MakeTmask(SimpleInterface):
     output_spec = _MakeTmaskOutputSpec
 
     def _run_interface(self, runtime):
-        from ..utilities import replace_entities
-
-        output_file = replace_entities(
-            file=self.inputs.confounds_file, 
-            entities={
-                "desc": f"{str(self.inputs.fd_threshold).replace('.', 'p')}mm", 
-                "suffix": "tmask", 
-                "ext": ".txt",
-                "path": runtime.cwd
-        })
-        make_tmask(
-            in_file=self.inputs.confounds_file,
-            out_file=output_file,
+        
+        self._results["tmask_file"] = make_tmask(
+            confounds_file=self.inputs.confounds_file,
             fd_threshold=self.inputs.fd_threshold,
             minimum_unmasked_neighbors=self.inputs.minimum_unmasked_neighbors,
             start_censoring=self.inputs.start_censoring,
         )
-        self._results["tmask_file"] = output_file
+
         return runtime
 
     # def _list_outputs(self):
