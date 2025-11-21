@@ -18,7 +18,7 @@ from bids.utils import listify
 def build_oceanfla_wf(subjects: list[str] | None, base_dir=Path | str):
 
     tasks = all_opts.task
-    wf_name = f"tasks_{'-'.join(tasks)}_wf"
+    wf_name = f"oceanfla_tasks_{'-'.join(tasks)}_wf"
     fla_wf = Workflow(name=wf_name, base_dir=base_dir)
     # fla_wf.base_dir = all_opts.work_dir
 
