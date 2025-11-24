@@ -444,7 +444,18 @@ def build_run_workflow(run, task: str):
         ])
         outputnode.inputs.nuisance_matrix = None
         last_func_node = regression_wf.get_node("outputnode")
-
+        if all_opts.debug:
+            nuisance_datasink = Node(DerivativesDataSink(
+                base_directory = all_opts.output_dir,
+                compress = True,
+                desc = "nuisanceregressed",
+                suffix = "bold",
+            ))
+            workflow.connect([
+                (regression_wf, nuisance_datasink, [
+                    "outputnode.bold_file", "in_file"
+                ])
+            ])
     else:
         workflow.connect([
             (events_matrix_node, outputnode, [
@@ -480,13 +491,21 @@ def build_run_workflow(run, task: str):
                 ("tr", "tr")
             ]),
         ])
+        
+        if all_opts.debug:
+            filter_datasink = Node(DerivativesDataSink(
+                base_directory = all_opts.output_dir,
+                compress = True,
+                desc = f"filtered{'-hp' + str(all_opts.highpass) if all_opts.highpass else ''}{'-lp' + str(all_opts.lowpass) if all_opts.lowpass else ''}",
+                suffix = "bold",
+            ))
+            workflow.connect([
+                (filter_node, filter_datasink, [
+                    ("bold_file", "in_file")
+                ])
+            ])
 
         last_func_node = filter_node
-
-    ### Datasink for user outputs ###
-    if all_opts.debug:
-        pass
-    
 
     ### Connect outputs ###
     workflow.connect([
