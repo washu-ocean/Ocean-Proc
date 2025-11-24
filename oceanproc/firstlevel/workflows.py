@@ -273,7 +273,7 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     return workflow
 
 
-def build_run_workflow(run, task):
+def build_run_workflow(run, task: str):
     from oceanproc.firstlevel.interfaces.nuisance import make_regressor_run_specific
 
     ### Define the workflow and the inputnode ###
@@ -402,6 +402,19 @@ def build_run_workflow(run, task):
             ])
         ])
         last_func_node = percent_change_node
+        if all_opts.debug:
+            percent_change_datasink_node = Node(DerivativesDataSink(
+                base_directory = all_opts.output_dir,
+                compress = True,
+                desc = "psc",
+                suffix = "bold",
+                task = "task",
+            ))
+            workflow.connect([
+                (percent_change_node, percent_change_datasink_node, [
+                    ("bold_file", "in_file")
+                ])
+            ])
 
     ### Nuisance regression ###
     if all_opts.nuisance_regression:
@@ -471,7 +484,8 @@ def build_run_workflow(run, task):
         last_func_node = filter_node
 
     ### Datasink for user outputs ###
-
+    if all_opts.debug:
+        pass
     
 
     ### Connect outputs ###
