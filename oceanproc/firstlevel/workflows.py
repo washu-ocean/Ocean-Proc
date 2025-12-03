@@ -40,6 +40,7 @@ workflows as children that combine outputs to form a single regression workflow 
 space.
 '''
 
+
 def build_oceanfla_wf(subjects: list[str] | None, base_dir=Path | str):
 
     tasks = all_opts.task
@@ -219,7 +220,9 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
     # source_node = None
     for task, run_list in run_map.items():
         for run in run_list:
-            run_level_wf = build_run_workflow(run, task)
+            run_level_wf = build_run_workflow(run=run,
+                                              task=task,
+                                              compress_files=file_extension.endswith(".gz"))
 
             # Define a node to extract the run-specific files from the data-grabbers
             extract_task_run_group_node = Node(
@@ -271,34 +274,71 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
 
     ### Datasink for user outputs ###
     need_compress = file_extension.endswith(".gz")
-    ds_beta_weights = Node(
+    task_name = "-".join(run_map.keys())
+    beta_weights_ds = Node(
         DerivativesDataSink(
-            base_directory = all_opts.output_dir,
-            compress = need_compress,
-            dismiss_entities = ["desc", "run"],
-            suffix = "boldmap",
-            stat = "effect",
-            task = "-".join(run_map.keys()),
+            base_directory=all_opts.output_dir,
+            compress=need_compress,
+            dismiss_entities=["desc", "run"],
+            suffix="boldmap",
+            stat="effect",
+            task=task_name,
             allowed_entities=("condition", "stat")
         ),
-        name=f"ds_{func_space}_beta_weights"
+        name=f"{func_space}_beta_weights_ds"
     )
-
     workflow.connect([
-        (regression_wf, ds_beta_weights, [
+        (regression_wf, beta_weights_ds, [
             ("outputnode.beta_files", "in_file"),
             ("outputnode.beta_labels", "condition")
         ]),
-        (derivs_grabber, ds_beta_weights, [
+        (derivs_grabber, beta_weights_ds, [
             ("bold", "source_file")
         ])
     ])
 
+    design_matrix_ds = Node(
+        DerivativesDataSink(
+            base_directory=all_opts.output_dir,
+            dismiss_entities=["run"],
+            des="final",
+            suffix="design",
+            task=task_name,
+        ),
+        name=f"{func_space}_design_matrix_ds"
+    )
+    workflow.connect([
+        (regression_wf, design_matrix_ds, [
+            ("outputnode.design_matrix", "in_file"),
+        ]),
+        (derivs_grabber, design_matrix_ds, [
+            ("confounds", "source_file")
+        ])
+    ])
+
+    residual_bold_ds = Node(
+        DerivativesDataSink(
+            base_directory=all_opts.output_dir,
+            compress=need_compress,
+            dismiss_entities=["run"],
+            desc="glmResidual",
+            task=task_name,
+        ),
+        name=f"{func_space}_residual_bold_ds"
+    )
+    workflow.connect([
+        (regression_wf, residual_bold_ds, [
+            ("outputnode.bold_file", "in_file"),
+        ]),
+        (derivs_grabber, residual_bold_ds, [
+            ("bold", "source_file")
+        ])
+    ])
 
     return workflow
 
 
-def build_run_workflow(run, task: str):
+def build_run_workflow(run, task: str, compress_files=False):
     from oceanproc.firstlevel.interfaces.nuisance import make_regressor_run_specific
 
     ### Define the workflow and the inputnode ###
@@ -408,6 +448,54 @@ def build_run_workflow(run, task: str):
     ])
     last_func_node = inputnode
 
+    if all_opts.debug:
+        # save out the working files
+        event_matrix_ds = Node(DerivativesDataSink(
+            base_directory=all_opts.output_dir,
+            desc="long"
+            ),
+            name="event_matrix_ds"
+        )
+        workflow.connect([
+            (inputnode, event_matrix_ds, [
+                ("events_file", "source_file")
+            ]),
+            (events_matrix_node, event_matrix_ds, [
+                ("events_matrix", "in_file")
+            ])
+        ])
+
+        nuisance_matrix_ds = Node(DerivativesDataSink(
+            base_directory=all_opts.output_dir,
+            desc="nuisance"
+            ),
+            name="nuisance_matrix_ds"
+        )
+        workflow.connect([
+            (inputnode, nuisance_matrix_ds, [
+                ("confounds_file", "source_file")
+            ]),
+            (nuisance_mat_node, nuisance_matrix_ds, [
+                ("nuisance_matrix", "in_file")
+            ])
+        ])
+
+        tmask_ds = Node(DerivativesDataSink(
+            base_directory=all_opts.output_dir,
+            desc="temporal",
+            suffix="mask"
+            ),
+            name="tmask_ds"
+        )
+        workflow.connect([
+            (inputnode, tmask_ds, [
+                ("confounds_file", "source_file")
+            ]),
+            (tmask_node, tmask_ds, [
+                ("tmask_file", "in_file")
+            ])
+        ])
+
     ### Percent signal change ###
     if all_opts.percent_change:
         # make psc node
@@ -428,16 +516,19 @@ def build_run_workflow(run, task: str):
         ])
         last_func_node = percent_change_node
         if all_opts.debug:
-            percent_change_datasink_node = Node(DerivativesDataSink(
-                base_directory = all_opts.output_dir,
-                compress = True,
-                desc = "psc",
-                suffix = "bold",
-                task = "task",
-            ))
+            percent_change_ds = Node(DerivativesDataSink(
+                    base_directory=all_opts.output_dir,
+                    compress=compress_files,
+                    desc="psc",
+                ),
+                name="percent_change_bold_ds"
+            )
             workflow.connect([
-                (percent_change_node, percent_change_datasink_node, [
+                (percent_change_node, percent_change_ds, [
                     ("bold_file", "in_file")
+                ]),
+                (inputnode, percent_change_ds, [
+                    ("bold_file", "source_file")
                 ])
             ])
 
@@ -469,18 +560,61 @@ def build_run_workflow(run, task: str):
         ])
         outputnode.inputs.nuisance_matrix = None
         last_func_node = regression_wf.get_node("outputnode")
+
         if all_opts.debug:
-            nuisance_datasink = Node(DerivativesDataSink(
-                base_directory = all_opts.output_dir,
-                compress = True,
-                desc = "nuisanceregressed",
-                suffix = "bold",
-            ))
+            regressed_bold_ds = Node(DerivativesDataSink(
+                    base_directory=all_opts.output_dir,
+                    compress=compress_files,
+                    desc="nuisanceRegressed"
+                ),
+                name="regressed_bold_ds"
+            )
             workflow.connect([
-                (regression_wf, nuisance_datasink, [
-                    "outputnode.bold_file", "in_file"
+                (regression_wf, regressed_bold_ds, [
+                    ("outputnode.bold_file", "in_file")
+                ]),
+                (inputnode, regressed_bold_ds, [
+                    ("bold_file", "source_file")
                 ])
             ])
+
+            nuisance_betas_ds = Node(DerivativesDataSink(
+                    base_directory=all_opts.output_dir,
+                    compress=compress_files,
+                    dismiss_entities=["desc"],
+                    suffix="boldmap",
+                    stat="effect",
+                    allowed_entities=("condition", "stat")
+                ),
+                name="nuisance_betas_ds"
+            )
+            workflow.connect([
+                (regression_wf, nuisance_betas_ds, [
+                    ("outputnode.beta_files", "in_file"),
+                    ("outputnode.beta_labels", "condition")
+                ]),
+                (inputnode , nuisance_betas_ds, [
+                    ("bold_file", "source_file")
+                ])
+            ])
+
+            design_file_ds = Node(DerivativesDataSink(
+                    base_directory=all_opts.output_dir,
+                    compress=compress_files,
+                    desc="nuisance",
+                    suffix="design"
+                ),
+                name="design_file_ds"
+            )
+            workflow.connect([
+                (regression_wf, design_file_ds, [
+                    ("outputnode.design_matrix", "in_file"),
+                ]),
+                (inputnode , design_file_ds, [
+                    ("confounds_file", "source_file")
+                ])
+            ])
+
     else:
         workflow.connect([
             (events_matrix_node, outputnode, [
@@ -516,17 +650,21 @@ def build_run_workflow(run, task: str):
                 ("tr", "tr")
             ]),
         ])
-        
+
         if all_opts.debug:
-            filter_datasink = Node(DerivativesDataSink(
-                base_directory = all_opts.output_dir,
-                compress = True,
-                desc = f"filtered{'-hp' + str(all_opts.highpass) if all_opts.highpass else ''}{'-lp' + str(all_opts.lowpass) if all_opts.lowpass else ''}",
-                suffix = "bold",
-            ))
+            filter_ds = Node(DerivativesDataSink(
+                base_directory=all_opts.output_dir,
+                compress=compress_files,
+                desc=f"filtered{'-hp' + str(all_opts.highpass) if all_opts.highpass else ''}{'-lp' + str(all_opts.lowpass) if all_opts.lowpass else ''}",
+                ),
+                name="filtered_bold_ds"
+            )
             workflow.connect([
-                (filter_node, filter_datasink, [
+                (filter_node, filter_ds, [
                     ("bold_file", "in_file")
+                ]),
+                (inputnode, filter_ds, [
+                    ("bold_file", "source_file")
                 ])
             ])
 
@@ -632,3 +770,28 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
         concat_data_node.inputs.tmask_files_in = None
 
     return workflow
+
+
+def build_exclusion_wf(run, task):
+
+    workflow = Workflow(name=f"task_{task}_run_{run}_exclusion_wf")
+    inputnode = Node(
+        IdentityInterface(
+            fields=[
+                "bold_file",
+                "tmask_file"
+            ]
+        ),
+        name="inputnode"
+    )
+    outputnode = Node(
+        IdentityInterface(
+            fields=[
+                "include"
+            ]
+        ),
+        name="outputnode"
+    )
+
+    ### Create tSNR node ### 
+    
