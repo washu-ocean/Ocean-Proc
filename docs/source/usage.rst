@@ -144,6 +144,16 @@ Here's the output of ``oceanproc -h``:
     listed in the help message will be passed to the preprocessing subprocess.
 
 
+Additional arguments specific to fMRIprep/nibabies
+--------------------------------------------------
+
+The options listed in ``oceanproc -h`` don't include the vast number of configuration options specific to fMRIprep/nibabies. Despite this, any options that fMRIprep/nibabies accept that are given to ``oceanproc`` will be passed to that program.
+
+Links to usage info for both below:
+
+`https://fmriprep.org/en/stable/usage.html#command-line-arguments`
+`https://nibabies.readthedocs.io/en/latest/usage.html#command-line-arguments`
+
 
 
 Specifying which fieldmaps to use with which BOLD runs
