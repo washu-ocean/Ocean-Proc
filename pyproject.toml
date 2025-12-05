@@ -20,6 +20,7 @@ authors = [
 ]
 requires-python = "<3.13,>=3.10"
 dependencies = [
+    "sphinx-rtd-theme>=2.0.0,<3.0.0",
     "flask<4.0.0,>=3.0.3",
     "asttokens<3.0.0,>=2.4.1",
     "numpy>=1.26.0",
@@ -45,5 +46,5 @@ dev = [
     "sphinx<8.0.0,>=7.3.7",
     "twine<6.0.0,>=5.1.0",
     "ipython<9.0.0,>=8.29.0",
-    "sphinx-rtd-theme>=2.0.0,<3.0.0",
+    
 ]
