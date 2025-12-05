@@ -1,14 +1,16 @@
+from sqlite3 import connect
 from nipype import Node, Workflow, Function, MapNode
 from nipype.interfaces.io import BIDSDataGrabber
 from nipype.interfaces.utility import IdentityInterface
 from niworkflows.utils.bids import collect_participants
 from niworkflows.interfaces.bids import DerivativesDataSink
 from oceanproc.firstlevel.interfaces.clean import FilterData, PercentChange
+from oceanproc.firstlevel.interfaces.events import EventsMatrix, GetVolumeCount
+from oceanproc.firstlevel.interfaces.exclusions import CheckRunRetention, CheckRuntSNR
 from oceanproc.firstlevel.interfaces.nuisance import GenerateNuisanceMatrix
 from oceanproc.firstlevel.interfaces.regression import ConcatRegressionData, RunGLMRegression
 from oceanproc.firstlevel.interfaces.tmask import MakeTmask
 from oceanproc.firstlevel.interfaces.utility import MergeUnique, ExtractDataGroup
-from . import operations
 from pathlib import Path
 from .config import all_opts
 from . import utilities
@@ -268,7 +270,8 @@ def build_func_space_wf(func_space: str, run_map: dict, file_extension: str):
             ("bold_file", "inputnode.bold_files"),
             ("tmask_file", "inputnode.tmask_files"),
             ("design_matrix", "inputnode.event_matrices"),
-            ("nuisance_matrix", "inputnode.nuisance_matrices")
+            ("nuisance_matrix", "inputnode.nuisance_matrices"),
+            ("include_in_regression", "inclusion_list")
         ])
     ])
 
@@ -360,10 +363,43 @@ def build_run_workflow(run, task: str, compress_files=False):
                 "design_matrix",
                 "nuisance_matrix",
                 "tmask_file",
+                "include_in_regression"
             ]
         ),
         name="outputnode"
     )
+
+    ### Create run-level temporal mask ###
+    tmask_node = Node(
+        MakeTmask(
+            fd_threshold=all_opts.fd_threshold,
+            minimum_unmasked_neighbors=all_opts.minimum_unmasked_neighbors,
+            start_censoring=all_opts.start_censoring
+        ),
+        name="make_tmask_node"
+    )
+
+    ### Check that this run passes exclusion criteria ### 
+    exclusion_wf = build_exclusion_wf(run, task)
+
+    workflow.connect([
+        (inputnode, tmask_node, [
+            ("confounds_file", "confounds_file")
+        ]),
+        (inputnode, exclusion_wf, [
+            ("bold_file", "inputnode.bold_file"),
+        ]),
+        (tmask_node, exclusion_wf, [
+            ("tmask_file", "inputnode.tmask_file")
+        ]),
+        (exclusion_wf, outputnode, [
+            ("outputnode.include", "include_in_regression")
+        ]),
+        (tmask_node, outputnode, [
+            ("tmask_file", "tmask_file"),
+        ])
+    ])
+
 
     ### Create run-level event matrix ###
     def tr_extract_func(file, known_tr=None):
@@ -384,13 +420,13 @@ def build_run_workflow(run, task: str, compress_files=False):
     extract_tr_node.inputs.known_tr = all_opts.repetition_time
 
     get_volumes_node = Node(
-        operations.GetVolumeCount,
+        GetVolumeCount,
         name="get_run_volumes_node"
     )
     get_volumes_node.inputs.brain_mask = all_opts.brain_mask
 
     events_matrix_node = Node(
-        operations.EventsMatrix(
+        EventsMatrix(
             fir=all_opts.fir,
             hrf=all_opts.hrf,
             fir_vars=all_opts.fir_vars,
@@ -413,16 +449,6 @@ def build_run_workflow(run, task: str, compress_files=False):
         name="nuisance_matrix_node"
     )
 
-    ### Create run-level temporal mask ###
-    tmask_node = Node(
-        MakeTmask(
-            fd_threshold=all_opts.fd_threshold,
-            minimum_unmasked_neighbors=all_opts.minimum_unmasked_neighbors,
-            start_censoring=all_opts.start_censoring
-        ),
-        name="make_tmask_node"
-    )
-
     workflow.connect([
         (inputnode, extract_tr_node, [
             ("bold_file", "file")
@@ -440,9 +466,6 @@ def build_run_workflow(run, task: str, compress_files=False):
             ("events_file", "event_file")
         ]),
         (inputnode, nuisance_mat_node, [
-            ("confounds_file", "confounds_file")
-        ]),
-        (inputnode, tmask_node, [
             ("confounds_file", "confounds_file")
         ])
     ])
@@ -670,11 +693,8 @@ def build_run_workflow(run, task: str, compress_files=False):
 
         last_func_node = filter_node
 
-    ### Connect outputs ###
+    ### Connect final bold output ###
     workflow.connect([
-        (tmask_node, outputnode, [
-            ("tmask_file", "tmask_file"),
-        ]),
         (last_func_node, outputnode, [
             ("bold_file", "bold_file")
         ])
@@ -699,22 +719,22 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
                 "tmask_files",
                 "nuisance_matrices",
                 "regressor_columns",
+                "inclusion_list"
             ]
         ),
         name="inputnode"
     )
     inputnode.inputs.regressor_columns = regression_columns
 
-    output_fields = [
-        "beta_files",
-        "beta_labels",
-        "bold_file",
-        "design_matrix",
-        "residual_design_matrix"
-    ]
     outputnode = Node(
         IdentityInterface(
-            fields=output_fields
+            fields=[
+                "beta_files",
+                "beta_labels",
+                "bold_file",
+                "design_matrix",
+                "residual_design_matrix"
+            ]
         ),
         name="outputnode"
     )
@@ -745,7 +765,8 @@ def build_regression_workflow(tasks, run=None, regression_columns=None):
             ("bold_files", "bold_files_in"),
             ("event_matrices", "event_matrices"),
             ("nuisance_matrices", "nuisance_matrices"),
-            ("regressor_columns", "regressor_columns")
+            ("regressor_columns", "regressor_columns"),
+            ("inclusion_list", "inclusion_list")
         ]),
         (concat_data_node, glm_node, [
             ("bold_file", "bold_file_in"),
@@ -794,4 +815,59 @@ def build_exclusion_wf(run, task):
     )
 
     ### Create tSNR node ### 
-    
+    tsnr_check_node = Node(
+        CheckRuntSNR(
+            tsnr_threshold=all_opts.min_average_tsnr,
+            brain_mask=all_opts.brain_mask,
+        ),
+        name="check_tsnr_node"
+    )
+
+    frame_retention_check_node = Node(
+        CheckRunRetention(
+            retention_threshold=all_opts.run_exclusion_threshold,
+            start_censoring=all_opts.start_censoring
+        ),
+        name="check_frame_retention_node"
+    )
+
+    validation_merging_node = Node(
+        MergeUnique(),
+        name="merge_validations_node"
+    )
+
+    check_validation_node = Node(
+        Function(
+            function=all,
+            input_names=["validation_list"],
+            output_names="include"
+        ),
+        name="check_validation_node"
+    )
+
+    workflow.connect([
+        (inputnode, tsnr_check_node, [
+            ("bold_file", "bold_file"),
+            ("tmask_file", "tmask_file")
+        ]),
+        (inputnode, frame_retention_check_node, [
+            ("tmask_file", "tmask_file")
+        ]),
+        (tsnr_check_node, validation_merging_node, [
+            ("valid", "valid_x1")
+        ]),
+        (frame_retention_check_node, validation_merging_node, [
+            ("valid", "valid_x2")
+        ]),
+        (validation_merging_node, check_validation_node, [
+            ("valid", "validation_list")
+        ]),
+        (check_validation_node, outputnode, [
+            ("include", "include")
+        ])
+    ])
+
+    return workflow
+
+
+

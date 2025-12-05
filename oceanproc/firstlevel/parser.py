@@ -51,7 +51,7 @@ def _build_parser():
             try:
                 out = [dtype(v) for v in val]
                 for v in out:
-                    if v <= 0:
+                    if v < 0:
                         valid = False
                         break
             except:
@@ -59,22 +59,46 @@ def _build_parser():
         elif isinstance(val, str):
             try:
                 out = dtype(val)
-                valid = (out >= 0)
+                valid = (out > 0)
             except:
                 valid = False
         else:
             valid = False
         if not valid:
             raise argparse.ArgumentTypeError(
-                f"The value(s) supplied must be numerical and greater than zero: {val}"
+                f"The value(s) supplied must be numerical and greater than or equal to zero: {val}"
             )
         return out
-
+    
     def PositiveInt(val):
         return PositiveVal(val, int)
+    
+    def AboveZeroInt(val):
+        i_val = PositiveInt(val)
+        if i_val <= 0:
+            raise argparse.ArgumentTypeError(
+                f"The value(s) supplied must be greater than zero: {val}"
+            )
+        return i_val
 
     def PositiveFloat(val):
         return PositiveVal(val, float)
+    
+    def AboveZeroFloat(val):
+        f_val = PositiveFloat(val)
+        if f_val <= 0:
+            raise argparse.ArgumentTypeError(
+                f"The value(s) supplied must be greater than zero: {val}"
+            )
+        return f_val
+    
+    def Percent(val):
+        f_val = PositiveFloat(val)
+        if f_val > 100 or f_val < 0:
+            raise argparse.ArgumentTypeError(
+                f"The value supplied cannot be interpreted as a percentage: {val}"
+            )
+        return f_val
 
     # Create the argument parser
     parser = OceanParser(
@@ -123,7 +147,7 @@ def _build_parser():
     config_arguments.add_argument("--func_space", default="fsLR",
                                   help="Space that the preprocessed data should be in (for example, 'T2w', 'MNIInfant', etc.)")
 
-    config_arguments.add_argument("--fwhm", type=PositiveFloat,
+    config_arguments.add_argument("--fwhm", type=AboveZeroFloat,
                                   help="FWHM smoothing kernel, in mm (only applies to CIFTI data)")
 
     config_arguments.add_argument("--derivs_dir", "-d", type=ExistingDir, required=True,
@@ -144,14 +168,14 @@ def _build_parser():
     config_arguments.add_argument("--custom_desc", "-cd",
                                   help="A custom description to add in the file name of every output file.")
 
-    config_arguments.add_argument("--fir", "-ff", type=PositiveInt,
+    config_arguments.add_argument("--fir", "-ff", type=AboveZeroInt,
                                   help="The number of frames to use in an FIR model.")
 
     config_arguments.add_argument("--fir_vars", nargs="*",
                                   help="""A list of the task regressors to apply this FIR model to. The default is to apply it to all regressors if no 
                                   value is specified. A list must be specified if both types of models are being used""")
 
-    config_arguments.add_argument("--hrf", nargs=2, type=PositiveInt, metavar=("PEAK", "UNDER"),
+    config_arguments.add_argument("--hrf", nargs=2, type=AboveZeroInt, metavar=("PEAK", "UNDER"),
                                   help="""Two values to describe the hrf function that will be convolved with the task events. 
                                   The first value is the time to the peak, and the second is the undershoot duration. Both in units of seconds.""")
 
@@ -175,13 +199,13 @@ def _build_parser():
     config_arguments.add_argument("--fd_threshold", "-fd", type=PositiveFloat, default=0.9,
                                   help="The framewise displacement threshold used when censoring high-motion frames")
 
-    config_arguments.add_argument("--minimum_unmasked_neighbors", "-mun", type=PositiveInt, default=None,
+    config_arguments.add_argument("--minimum_unmasked_neighbors", "-mun", type=AboveZeroInt, default=None,
                                   help="Minimum number of contiguous unmasked frames on either side of a given frame that's required to be under the fd_threshold; any unmasked frame without the required number of neighbors will be masked.")
 
     config_arguments.add_argument("--tmask", action=argparse.BooleanOptionalAction,
                                   help="Flag to indicate that tmask files, if found with the preprocessed outputs, should be used. Tmask files will override framewise displacement threshold censoring if applicable.")
 
-    config_arguments.add_argument("--repetition_time", "-tr", type=PositiveFloat,
+    config_arguments.add_argument("--repetition_time", "-tr", type=AboveZeroFloat,
                                   help="Repetition time of the function runs in seconds. If it is not supplied, an attempt will be made to read it from the JSON sidecar file.")
 
     config_arguments.add_argument("--detrend_data", "-dd", action="store_true",
@@ -201,8 +225,11 @@ def _build_parser():
     high_motion_params.add_argument("--fd_censoring", "-fc", action="store_true",
                                     help="Flag to indicate that frames above the framewise displacement threshold should be censored before the GLM.")
 
-    config_arguments.add_argument("--run_exclusion_threshold", "-re", type=PositiveInt,
+    config_arguments.add_argument("--run_exclusion_threshold", "-re", type=Percent, default=0.0,
                                   help="The percent of frames a run must retain after high motion censoring to be included in the fine GLM. Only has effect when '--fd_censoring' is active.")
+    
+    config_arguments.add_argument("--min_average_tsnr", type=PositiveFloat, default=0.0,
+                                  help="The minimum whole-brain-average TSNR (across unmasked frames) required for a run to be included in analysis.")
 
     config_arguments.add_argument("--nuisance_regression", "-nr", nargs="*", default=[],
                                   help="""List of variables to include in nuisance regression before the performing the GLM for event-related activation. If no values are specified then
@@ -211,11 +238,11 @@ def _build_parser():
     config_arguments.add_argument("--nuisance_fd", "-nf", type=PositiveFloat,
                                   help="The framewise displacement threshold used when censoring frames for nuisance regression.")
 
-    config_arguments.add_argument("--highpass", "-hp", type=PositiveFloat, nargs="?", const=0.008,
+    config_arguments.add_argument("--highpass", "-hp", type=AboveZeroFloat, nargs="?", const=0.008,
                                   help="""The high pass cutoff frequency for signal filtering. Frequencies below this value (Hz) will be filtered out. If the argument 
                                   is supplied but no value is given, then the value will default to 0.008 Hz""")
 
-    config_arguments.add_argument("--lowpass", "-lp", type=PositiveFloat, nargs="?", const=0.1,
+    config_arguments.add_argument("--lowpass", "-lp", type=AboveZeroFloat, nargs="?", const=0.1,
                                   help="""The low pass cutoff frequency for signal filtering. Frequencies above this value (Hz) will be filtered out. If the argument 
                                   is supplied but no value is given, then the value will default to 0.1 Hz""")
 

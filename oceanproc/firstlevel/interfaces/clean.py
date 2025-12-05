@@ -78,8 +78,6 @@ class FilterData(SimpleInterface):
 
         return runtime
 
-    # def _list_outputs(self):
-    #     return {'out_file': self.inputs.out_file}
 
 
 class PercentChangeInputSpec(BaseInterfaceInputSpec):
@@ -117,6 +115,12 @@ class PercentChange(SimpleInterface):
         )
 
         return runtime
+    
+
+class SmoothFWHM(SimpleInterface):
+    pass
+    ## TODO ##
+
 
 
 def filter_data(func_file: str,

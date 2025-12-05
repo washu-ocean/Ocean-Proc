@@ -1,8 +1,6 @@
 from nipype.interfaces.base import SimpleInterface, BaseInterfaceInputSpec, traits, File, TraitedSpec
 from pathlib import Path
-import pandas as pd
 from nipype import logging, Function
-from textwrap import dedent
 
 
 logger = logging.getLogger("nipype.interface")
@@ -82,9 +80,10 @@ def make_design_matrix(event_file: str | Path,
                        fir_vars: list[str] = None,
                        hrf_vars: list[str] = None,
                        unmodeled: list[str] = None):
-    from .utilities import replace_entities
+    from ..utilities import replace_entities
     import pandas as pd
     import numpy as np
+    from textwrap import dedent
 
     events_long = _make_events_long(event_file, volumes, tr)
     events_matrix = events_long.copy()
@@ -213,7 +212,7 @@ def _make_events_long(event_file: Path, volumes: int, tr: float):
     return events_long
 
 
-def _hrf_convolve_features(features: pd.DataFrame = None,
+def _hrf_convolve_features(features,
                            column_names: list = None,
                            time_col: str = 'index',
                            units: str = 's',
