@@ -14,16 +14,25 @@ Outside of the processing done by `fmriprep`, `oceanproc` can also handle the co
 ## Usage
 
 ```
-usage: oceanproc [-h] --subject SUBJECT --session SESSION --bids_path
-                 BIDS_PATH --source_data SOURCE_DATA --xml_path XML_PATH
-                 --bids_config BIDS_CONFIG [--nordic_config NORDIC_CONFIG]
-                 [--nifti] [--skip_bids_validation] [--leave_workdir]
-                 --derivs_path DERIVS_PATH --work_dir WORK_DIR --fs_license
-                 FS_LICENSE [--fs_subjects_dir FS_SUBJECTS_DIR]
-                 [--skip_dcm2bids] [--skip_fmap_pairing] [--skip_fmriprep]
-                 [--export_args EXPORT_ARGS]  @[ARG_FILE]
+usage: oceanproc [-h] [--version] --subject SUBJECT --session SESSION
+                 [--source_data SOURCE_DATA] [--skip_dcm2bids]
+                 [--usability_file USABILITY_FILE]
+                 [--longitudinal LONGITUDINAL [LONGITUDINAL ...]]
+                 [--skip_fmap_pairing] [--skip_segmentation] [--skip_preproc]
+                 [--skip_event_files] [--export_args EXPORT_ARGS]
+                 [--keep_work_dir] [--debug_mode]
+                 [--fmap_pairing_file FMAP_PAIRING_FILE] --bids_path BIDS_PATH
+                 --derivs_path DERIVS_PATH
+                 [--derivs_subfolder DERIVS_SUBFOLDER] --bids_config
+                 BIDS_CONFIG [--nordic_config NORDIC_CONFIG]
+                 [--nifti | --no-nifti] [--anat_only | --no-anat_only]
+                 [--fd_spike_threshold FD_SPIKE_THRESHOLD]
+                 [--skip_bids_validation | --no-skip_bids_validation]
+                 [--fs_subjects_dir FS_SUBJECTS_DIR]
+                 [--allow_uneven_fmap_groups]
+                 [--precomputed_derivatives [DERIVATIVES ...]] --work_dir
+                 WORK_DIR --fs_license FS_LICENSE
+                 [--image_version IMAGE_VERSION] [--infant | --no-infant | -I]
+                 [--bibsnet_image_path BIBSNET_IMAGE_PATH]
+                 [--bibsnet_work BIBSNET_WORK]
 ```
-
-
-
-
