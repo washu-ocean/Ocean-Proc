@@ -20,7 +20,6 @@ authors = [
 ]
 requires-python = "<3.13,>=3.10"
 dependencies = [
-    "sphinx-rtd-theme<3.0.0,>=2.0.0",
     "flask<4.0.0,>=3.0.3",
     "asttokens<3.0.0,>=2.4.1",
     "numpy>=1.26.0",
@@ -29,10 +28,6 @@ dependencies = [
     "scipy>=1.13.0",
     "matplotlib<4.0.0,>=3.9.1",
     "beautifulsoup4>=4.12.0",
-    "numba<1.0.0,>=0.60.0",
-    "torch<3.0.0,>=2.5.1",
-    "torchvision<1.0.0,>=0.20.1",
-    "torchaudio<3.0.0,>=2.5.1",
     "pybids>=0.16.3",
 ]
 name = "oceanproc"
@@ -50,4 +45,5 @@ dev = [
     "sphinx<8.0.0,>=7.3.7",
     "twine<6.0.0,>=5.1.0",
     "ipython<9.0.0,>=8.29.0",
+    "sphinx-rtd-theme>=2.0.0,<3.0.0",
 ]
