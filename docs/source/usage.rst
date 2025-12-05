@@ -151,8 +151,8 @@ The options listed in ``oceanproc -h`` don't include the vast number of configur
 
 Links to usage info for both below:
 
-`https://fmriprep.org/en/stable/usage.html#command-line-arguments`
-`https://nibabies.readthedocs.io/en/latest/usage.html#command-line-arguments`
+`<https://fmriprep.org/en/stable/usage.html#command-line-arguments>`
+`<https://nibabies.readthedocs.io/en/latest/usage.html#command-line-arguments>`
 
 
 
