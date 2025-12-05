@@ -149,7 +149,7 @@ Here's the output of ``oceanproc -h``:
 Specifying which fieldmaps to use with which BOLD runs
 ------------------------------------------------------
 
-Sometimes, depending on the quality of fieldmaps collected at the scanner, you'll want to specify which fieldmaps should be paired with which BOLD runs for distortion correction. This can be done by specifying a pairing file, a JSON containing this information, using the ``--fmap_pairing_file`` option.. Below is an example of this pairing file:
+If you want to specify which fieldmaps should be paired with which BOLD runs for distortion correction (instead of letting oceanproc automatically pair them based on closeness in time and localizer block), this can be done by specifying a pairing file, a JSON containing this information, using the ``--fmap_pairing_file`` option.. Below is an example of this pairing file:
 
 .. code-block:: json
 
