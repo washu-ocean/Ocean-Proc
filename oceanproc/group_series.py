@@ -183,7 +183,7 @@ def map_fmap_to_func(subject:str,
             if not allow_uneven_fmap_groups:
                 exit_program_early(f"--allow_uneven_fmap_groups not set. (#AP: {len(group['fmapAP'])}, #PA: {len(group['fmapPA'])})")
             elif len(group["fmapPA"]) == 0 or len(group["fmapAP"]) == 0:
-                exit_program_early(f"Not enough fieldmaps in one direction (#AP: {len(group['fmapAP'])}, #PA: {len(group['fmapPA'])})")
+                exit_program_early(f"Not enough fieldmaps in one direction (AP:\n{group['fmapAP']}, {len(group['fmapAP'])=}\nPA:\n{group['fmapAP']}, {len(group['fmapPA'])=})")
             fmap_pairs = uneven_fmap_pairing(group)
         else:
             fmap_pairs = even_fmap_pairing(group)
