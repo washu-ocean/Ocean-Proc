@@ -11,7 +11,7 @@ from textwrap import dedent
 import xml.etree.ElementTree as et
 from .utils import exit_program_early, prompt_user_continue, prepare_subprocess_logging, debug_logging, log_linebreak, flags, run_subprocess
 import logging
-from bids import BIDSLayout
+from bids import BIDSLayout, BIDSLayoutIndexer
 from bisect import bisect
 module_logger = logging.getLogger("fsspec")
 module_logger.setLevel(logging.CRITICAL)
@@ -41,7 +41,12 @@ def remove_unusable_runs(bids_path:Path, subject:str, session:str):
     logger.info("####### Removing the scans marked 'unusable' #######\n")
 
     # Try to delete based on "quality" key in sidecar files:
-    bids_layout = BIDSLayout(bids_path, validate=False)
+    ignore_list = ["tmp_dcm2bids"]
+    if (bids_path / ".bidsignore").is_file():
+        with (bids_path / ".bidsignore").open() as f:
+            ignore_list.extend(f.readlines())
+    ignore_list = list(set(ignore_list))
+    bids_layout = BIDSLayout(bids_path, validate=False, indexer=BIDSLayoutIndexer(ignore=ignore_list, validate=False))
     data_files = bids_layout.get(subject=subject, session=session, extension="nii.gz", datatype=".*", regex_search=True)
     if len(data_files) == 0:
         exit_program_early("Could not find any data files in the bids directory.")
