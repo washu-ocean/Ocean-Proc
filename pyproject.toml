@@ -32,7 +32,7 @@ dependencies = [
     "pybids>=0.16.3",
 ]
 name = "oceanproc"
-version = "1.1.7"
+version = "1.1.8"
 description = "MRI preprocessing for WUSTL Ocean labs"
 readme = "README.md"
 
