@@ -29,14 +29,6 @@ infant_defaults = SimpleNamespace(
     derivs_subfolder="nibabies",
 )
 
-# Good arguments to have if not specified
-# { key : (val, can_have_multiple_values)}
-preproc_kwargs = {
-    "cifti-output":("91k", False),
-    "output-spaces": ("fsLR", True),
-    "output-spaces": ("MNI152NLin2009cAsym", True)
-}
-
 # Preprocessing arguments that need to have their paths binded when running docker
 mount_opts = {"fs_subjects_dir",
                   "derivatives"}
@@ -273,20 +265,6 @@ def process_data(subject:str,
     :type remove_work_folder: str
     :param **kwargs: any arguments to be passed to the preprocessing subprocess
     """
-
-    # Add in some recommended options
-    for key, (val, multi) in preproc_kwargs.items():
-        if (key in kwargs) and multi:
-            if isinstance(kwargs[key], list):
-                if val not in kwargs[key]:
-                    kwargs[key].append(val)
-            else:
-                if val != kwargs[key]:
-                    kwargs[key] = [kwargs[key], val]
-        elif key not in kwargs:
-            kwargs[key] = val
-
-
     option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
     preproc_title = "NiBabies" if flags.infant else "fMRIPrep"
 
