@@ -38,7 +38,7 @@ readme = "README.md"
 
 [project.scripts]
 oceanproc = "oceanproc.ocean_proc:main"
-oceanfla = "oceanproc.firstlevel.run_glm:main"
+oceanfla_legacy = "oceanproc.firstlevel.run_glm:main"
 
 [dependency-groups]
 dev = [
