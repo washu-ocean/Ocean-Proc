@@ -8,7 +8,12 @@ from pathlib import Path
 import xml.etree.ElementTree as et
 from bids import BIDSLayout
 import logging
+
+from bids.layout import BIDSFile
 from .utils import exit_program_early, debug_logging, log_linebreak, flags
+import nibabel as nib
+import numpy as np
+import shutil
 
 module_logger = logging.getLogger("fsspec")
 module_logger.setLevel(logging.CRITICAL)
@@ -51,6 +56,23 @@ def get_empty_group():
     return {"task":set(), "fmapAP": set(), "fmapPA": set()}
 
 
+def get_json_sidecar(bids_file:BIDSFile|str, bids_layout:BIDSLayout) -> BIDSFile:
+    if isinstance(bids_file, BIDSFile):
+        bids_file = bids_file.path
+    sidecar_files = bids_layout.get(**(bids_layout.parse_file_entities(bids_file) | {"extension":".json"}))
+    if len(sidecar_files) != 1:
+        exit_program_early(f"Cannot find the associated JSON file for bids file: {bids_file.filename}")
+    return sidecar_files[0]
+
+
+def reset_intended_for(fmap_file:BIDSFile|str):
+    sidecar_file = get_json_sidecar(fmap_file)
+    jd = sidecar_file.get_dict()
+    jd["IntendedFor"] = []
+    with open(sidecar_file.path, "w") as out_file:
+        out_file.write(json.dumps(jd, indent=4))
+
+
 def get_func_from_bids(bids_layout: BIDSLayout,
                        subject:str,
                        session:str,
@@ -78,6 +100,11 @@ def get_fmap_from_bids(bids_layout: BIDSLayout,
         exit_program_early("Could not find any fieldmap files for this subject and session.")
 
     for epi_file in fmap_files:
+        reset_intended_for(epi_file)
+        file_entities = bids_layout.parse_file_entities(epi_file.path)
+        # skip previously extracted acqusitions
+        if ("acquisition" in file_entities) and str(file_entities["acquisition"]).isnumeric():
+            continue
         acq_time = datetime.strptime(epi_file.entities["AcquisitionTime"], "%H:%M:%S.%f")
         direction = f"fmap{epi_file.entities['direction']}"
         localizer_block_label = epi_file.entities["localizer_block"] if "localizer_block" in epi_file.entities else DEFAULT_LOCALIZER_LABEL
@@ -155,7 +182,8 @@ def even_fmap_pairing(localizer_group: dict) -> tuple:
 def map_fmap_to_func(subject:str,
                      session:str,
                      bids_path:Path,
-                     allow_uneven_fmap_groups: bool = False):
+                     allow_uneven_fmap_groups: bool = False,
+                     extract_best_fmap: bool = False):
     
     logger.info("####### Pairing field maps to functional runs #######\n")
 
@@ -195,23 +223,32 @@ def map_fmap_to_func(subject:str,
             fmap_times.append(times[0] + (abs(times[1] - times[0]) / 2))
 
         # pair task runs with field maps based on closest Acquisition Time
-        map_pairings = {s:[] for s in fmap_pairs}
+        time_pairings = {s:[] for s in fmap_pairs}
         for (t_file, t_acq_time) in group["task"]:
             diff = list(map(lambda x: abs(x - t_acq_time), fmap_times))
             pairing = fmap_pairs[diff.index(min(diff))]
-            map_pairings[pairing].append(t_file)
+            time_pairings[pairing].append(t_file)
+        
+        # gather the sidecar files and extract volumes if requested
+        file_pairing = dict()
+        for (ap_tup, pa_tup), task_files in time_pairings.items():
+            if extract_best_fmap:
+                ap_info = extract_best_acqusition(ap_tup[0], layout)
+                pa_info = extract_best_acqusition(pa_tup[0], layout)
+            else:
+                ap_info = (ap_tup[0], get_json_sidecar(ap_tup[0]))
+                pa_info = (pa_tup[0], get_json_sidecar(pa_tup[0]))
+            file_pairing[(ap_info, pa_info)] = task_files
 
         # add the list of task run files that are paired with each field map in their json files
         pairing_strs = []
-        for (ap_tup, pa_tup), task_files in map_pairings.items():
-            for fmap_file, fmap_type in ((ap_tup[0], "ap"), (pa_tup[0], "pa")):
-                fmap_json = [f for f in fmap_file.get_associations() if f.entities['extension'] == ".json"]
-                if len(fmap_json) != 1:
-                    exit_program_early(f"Cannot find the associated JSON file for fmap: {fmap_file.filename}")
-                fmap_json = fmap_json[0]
+        for fmap_info, task_files in file_pairing.items():
+            for fmap_file, fmap_json in fmap_info:
                 intended_for = [tf.relpath.split("/", 1)[-1] for tf in task_files]
                 task_series = set([f"{tf.filename}({str(tf.entities['SeriesNumber'])})" for tf in task_files])
-                jd = fmap_json.get_dict()
+                jd = None
+                with open(fmap_json.path, "r") as fjson:
+                    jd = json.load(fjson)
                 jd["IntendedFor"] = intended_for
                 with open(fmap_json.path, "w") as out_file:
                     logger.debug(f"writing field map pairing information to file: {fmap_json.filename}")
@@ -251,6 +288,38 @@ def map_fmap_to_func_with_pairing_file(bids_dir_path: Path,
             fmap_dict["IntendedFor"] = func_paths
             with fmap_json.open('w') as f:
                 json.dump(fmap_dict, f, indent=4)
+
+
+def extract_best_acqusition(fmap_file: str|BIDSFile, bids_layout: BIDSLayout) -> tuple[BIDSFile]:
+
+    if isinstance(fmap_file, BIDSFile):
+        fmap_file = fmap_file.path
+
+    fmap_img = nib.load(fmap_file)
+    fmap_data = fmap_img.get_fdata()
+    assert len(fmap_data.shape) == 4, f"Fieldmap supplied does not have 4 dimensions : {fmap_file}"
+
+    # file the volume with the lowest standard deviation
+    slice_diffs = np.diff(fmap_data, axis=2)
+    vol_stds = np.nanstd(slice_diffs, axis=(0,1,2))
+    best_vol = np.argmin(vol_stds)
+
+    # create a new bids name for the best volume
+    new_entities = bids_layout.parse_file_entities(fmap_file) | {"acquisition" : f"{best_vol+1:02d}"}
+    best_acq_fmap = bids_layout.build_path(new_entities)
+    # save out the new image
+    best_acq_fmap_img = fmap_img.__class__(fmap_data[:,:,:,best_vol], affine=fmap_img.affine)
+    nib.save(best_acq_fmap_img, best_acq_fmap)
+
+    # create a new bids name for the sidecar file
+    sidecar_entities = new_entities | {"extension": ".json"}
+    best_acq_json = bids_layout.build_path(sidecar_entities)
+    # find the original sidecar file and copy it
+    fmap_json = get_json_sidecar(fmap_file)
+    shutil.copy(fmap_json.path, best_acq_json)
+
+    return (BIDSFile(best_acq_fmap), BIDSFile(best_acq_json))
+    
 
 
 if __name__ == "__main__":
