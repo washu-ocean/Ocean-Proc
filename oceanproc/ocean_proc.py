@@ -5,13 +5,13 @@ import sys
 from pathlib import Path
 import logging
 import datetime
-from .bids_wrapper import dicom_to_bids, remove_unusable_runs, extend_session
-from .group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
-from .preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts
-from .segmentation_wrapper import segmentation_args, segment_anatomical
-from .events_long import create_events_and_confounds
-from .utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option
-from .oceanparse import OceanParser
+from oceanproc.bids_wrapper import dicom_to_bids, remove_unusable_runs, extend_session
+from oceanproc.group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
+from oceanproc.preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts
+from oceanproc.segmentation_wrapper import segmentation_args, segment_anatomical
+from oceanproc.events_long import create_events_and_confounds
+from oceanproc.utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option
+from oceanproc.oceanparse import OceanParser
 import shutil
 from textwrap import dedent
 
@@ -105,6 +105,8 @@ def main():
                              help="The path to the directory that contains previous FreeSurfer outputs/derivatives to use for fMRIPrep. If empty, this is the path where new FreeSurfer outputs will be stored.")
     config_args.add_argument("--allow_uneven_fmap_groups", action="store_true",
                              help="Flag to allow for automated fieldmap pairing when there's more AP- than PA-encoded fieldmaps, or vice versa (will still error out if at least one of each is not present.)")
+    config_args.add_argument("--extract_best_fmap", action="store_true",
+                             help="Flag to specify that the lowest variance fieldmap volume should be extracted from each fieldmap, and used for distortion correction (opposed to all volumes being used)")
     config_args.add_argument("--precomputed_derivatives", "-pd", type="Full-Path", dest="derivatives", nargs="*",
                              help="A list of paths to any BIDS-style precomputed derivatives that should be used in preprocessing. (Ex. /path/to/bibsnet)")
     config_args.add_argument("--work_dir", "-w", type=Path, required=True,
@@ -180,7 +182,7 @@ def main():
         try:
             assert args.export_args.parent.exists() and args.export_args.suffix, "Argument export path must be a file path in a directory that exists"
             logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######")
-            export_args_to_file(args, config_arguments, args.export_args, extra_args=unknown_args)
+            export_args_to_file(args, config_args, args.export_args, extra_args=unknown_args)
         except Exception as e:
             logger.exception(e)
             exit_program_early(e)
@@ -248,7 +250,8 @@ def main():
                 session=args.session,
                 bids_path=args.bids_path,
                 # xml_path=xml_data_path,
-                allow_uneven_fmap_groups=args.allow_uneven_fmap_groups
+                allow_uneven_fmap_groups=args.allow_uneven_fmap_groups,
+                extract_best_fmap=args.extract_best_fmap
             )
 
     ##### Run BIBSnet #####
