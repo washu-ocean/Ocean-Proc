@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 import logging
 import datetime
-from asyncio.tools import build_async_tree
 from oceanproc.bids_wrapper import dicom_to_bids, remove_unusable_runs, extend_session
 from oceanproc.group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
 from oceanproc.preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts, insert_dummy_frames
