@@ -23,7 +23,7 @@ remove_unusable -> relate xml and json with name and aqcuisition time (and serie
 
 
 @debug_logging
-def remove_unusable_runs(bids_path:Path, subject:str, session:str):
+def remove_unusable_runs(bids_layout:BIDSLayout, subject:str, session:str):
     """
     Will remove unusable scans from list of scans after dcm2bids has run.
 
@@ -41,12 +41,6 @@ def remove_unusable_runs(bids_path:Path, subject:str, session:str):
     logger.info("####### Removing the scans marked 'unusable' #######\n")
 
     # Try to delete based on "quality" key in sidecar files:
-    ignore_list = ["tmp_dcm2bids"]
-    if (bids_path / ".bidsignore").is_file():
-        with (bids_path / ".bidsignore").open() as f:
-            ignore_list.extend(f.readlines())
-    ignore_list = list(set(ignore_list))
-    bids_layout = BIDSLayout(bids_path, validate=False, indexer=BIDSLayoutIndexer(ignore=ignore_list, validate=False))
     data_files = bids_layout.get(subject=subject, session=session, extension="nii.gz", datatype=".*", regex_search=True)
     if len(data_files) == 0:
         exit_program_early("Could not find any data files in the bids directory.")

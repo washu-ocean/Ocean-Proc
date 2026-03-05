@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import logging
+from bids import BIDSLayout
 from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess
 import shutil
 from subprocess import Popen, PIPE
@@ -9,6 +10,7 @@ from matplotlib import pyplot as plt
 from bs4 import BeautifulSoup as bsoup
 import pandas as pd
 import numpy as np
+import nibabel as nib
 import json
 import os
 import copy
@@ -232,6 +234,69 @@ def add_fd_plot_to_report(subject:str,
         f.write(soup.prettify())
 
 
+def insert_dummy_frames(subject:str,
+                        session:str,
+                        dscan_dir:Path,
+                        bids_layout:BIDSLayout):
+    
+    dscans_suffix = "dscans"
+    dscans_path_pattern = "sub-{subject}[/ses-{session}]/{datatype<func|meg|beh>|func}/sub-{subject}[_ses-{session}]_task-{task}[_acq-{acquisition}][_rec-{reconstruction}][_run-{run}][_echo-{echo}][_recording-{recording}]_{suffix<"+dscans_suffix+">}{extension<.tsv|.json>|.tsv}"
+
+    # find all bold files
+    func_files = bids_layout.get(subject=subject, session=session, suffix="bold", datatype="func", extension="nii.gz")
+    for bfile in func_files:
+        if not Path(bfile.path).exists:
+            continue
+        # Find the dscans file for bold run
+        dscans_entities = bids_layout.parse_file_entities(bfile.path) | {"suffix":dscans_suffix, "extension":".tsv"}
+        dscans_bids_path = bids_layout.build_path(dscans_entities, path_patterns=[dscans_path_pattern], validate=False)
+        dscans_file = sorted(dscan_dir.glob(Path(dscans_bids_path).name))
+        if len(dscans_file) > 1:
+            exit_program_early(f"Found more than one 'dscans' file for bold run {bfile} --> {dscans_file}")
+        elif len(dscans_file) == 0:
+            logger.info(f"Did not find any 'dscans' files for bold run: {bfile}, file will remain unmodified.")
+            continue
+        dscans_file = dscans_file[0]
+        logger.info(f"found 'dscans' file <{dscans_file.name}> for bold run <{bfile.filename}>")
+
+        dscans_list = pd.read_csv(dscans_file, sep="\t").loc[:, "dummy_scan"].to_numpy().astype(np.int32)
+        bold_img = nib.load(bfile.path)
+        num_bold_frames = bold_img.shape[3]
+        num_dummy_scans = np.sum(dscans_list > 0)
+        num_non_dummy = np.sum(dscans_list == 0)
+        # validate length
+        if num_bold_frames != num_non_dummy:
+            exit_program_early(f"Length of non-dummy scans and bold data do not match. # non-dummy scans: {num_non_dummy}, # bold frames: {num_bold_frames}")
+
+        logger.info(f"inserting {num_dummy_scans} dummy scans into the bold run")
+        # create a new bold series with dummy scans inserted
+        bold_data = bold_img.get_fdata()
+        frame_list = []
+        dscans_index = 0
+        for f in range(num_bold_frames):
+            print("f: " + str(f))
+            print("dex:" + str(dscans_index))
+            copy_dex = f-1 if f > 0 else f
+            while dscans_list[dscans_index] != 0:
+                frame_list.append(bold_data[:,:,:,copy_dex])
+                dscans_index += 1
+            frame_list.append(bold_data[:,:,:,f])
+            dscans_index += 1
+            # check if end of run needs to be extended
+            if (f == num_bold_frames-1) and (dscans_list[dscans_index] == 1):
+                while dscans_index < len(dscans_list):
+                    frame_list.append(bold_data[:,:,:,f])
+                    dscans_index += 1
+
+        if len(frame_list) != len(dscans_list):
+            exit_program_early(f"Something went wrong when creating dummy scans, lengths do not match. bold frames: {len(frame_list)}, dscan length: {len(dscans_list)}")
+        
+        # save new image
+        extended_bold_data = np.stack(frame_list, axis=3)
+        extended_bold_img = bold_img.__class__(extended_bold_data, header=bold_img.header, affine=bold_img.affine)
+        logger.info(f"saving extended bold image")
+        nib.save(extended_bold_img, bfile.path)
+    
 
 @debug_logging
 def process_data(subject:str,

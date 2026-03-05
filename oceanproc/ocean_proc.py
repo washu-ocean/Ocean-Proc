@@ -5,13 +5,15 @@ import sys
 from pathlib import Path
 import logging
 import datetime
+from asyncio.tools import build_async_tree
 from oceanproc.bids_wrapper import dicom_to_bids, remove_unusable_runs, extend_session
 from oceanproc.group_series import map_fmap_to_func, map_fmap_to_func_with_pairing_file
-from oceanproc.preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts
+from oceanproc.preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts, insert_dummy_frames
 from oceanproc.segmentation_wrapper import segmentation_args, segment_anatomical
 from oceanproc.events_long import create_events_and_confounds
 from oceanproc.utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option
 from oceanproc.oceanparse import OceanParser
+from bids import BIDSLayout, BIDSLayoutIndexer
 import shutil
 from textwrap import dedent
 
@@ -107,6 +109,9 @@ def main():
                              help="Flag to allow for automated fieldmap pairing when there's more AP- than PA-encoded fieldmaps, or vice versa (will still error out if at least one of each is not present.)")
     config_args.add_argument("--extract_best_fmap", action="store_true",
                              help="Flag to specify that the lowest variance fieldmap volume should be extracted from each fieldmap, and used for distortion correction (opposed to all volumes being used)")
+    config_args.add_argument("--dscans_path", type=Path,
+                             help="""The path to the directory containing 'dscans' files for inserting dummy scans into bold runs. Must be named exactly as corresponding bold image except with 'dscans' as 
+                             the suffix and '.tsv' as the extension. Contents of the file must be a column, titled 'dummy_scan', with ones and zeros. Ones denote which frames should be dummy scans.""")
     config_args.add_argument("--precomputed_derivatives", "-pd", type="Full-Path", dest="derivatives", nargs="*",
                              help="A list of paths to any BIDS-style precomputed derivatives that should be used in preprocessing. (Ex. /path/to/bibsnet)")
     config_args.add_argument("--work_dir", "-w", type=Path, required=True,
@@ -228,10 +233,18 @@ def main():
                                session=args.session,
                                tmp_dir=bids_path,
                                bids_dir=args.bids_path)
+                
+    # create a bids layout object
+    ignore_list = ["tmp_dcm2bids"]
+    if (bids_path / ".bidsignore").is_file():
+        with open(bids_path / ".bidsignore", "r") as f:
+            ignore_list.extend(f.readlines())
+    ignore_list = list(set(ignore_list))
+    bids_layout = BIDSLayout(args.bids_path, validate=False, indexer=BIDSLayoutIndexer(ignore=ignore_list, validate=False))
 
     ##### Remove the scans marked as 'unusable' #####
     remove_unusable_runs(
-        bids_path=args.bids_path,
+        bids_layout=bids_layout,
         subject=args.subject,
         session=args.session
     )
@@ -245,10 +258,12 @@ def main():
                 args.fmap_pairing_file
             )
         else:
+            # update the bids layout
+            bids_layout = BIDSLayout(args.bids_path, validate=False, indexer=BIDSLayoutIndexer(ignore=ignore_list, validate=False))
             map_fmap_to_func(
                 subject=args.subject,
                 session=args.session,
-                bids_path=args.bids_path,
+                bids_layout=bids_layout,
                 # xml_path=xml_data_path,
                 allow_uneven_fmap_groups=args.allow_uneven_fmap_groups,
                 extract_best_fmap=args.extract_best_fmap
@@ -274,6 +289,17 @@ def main():
 
         if not bibsnet_path.exists():
             exit_program_early(f"Cannot find the outputs for BIBSnet at the path {bibsnet_path}")
+
+
+    ##### Insert dummy scans in requested #####
+    if args.dscans_path:
+        insert_dummy_frames(
+            subject=args.subject,
+            session=args.session,
+            dscan_dir=args.dscans_path,
+            bids_layout=bids_layout
+        )
+
 
     ##### Run fMRIPrep or NiBabies #####
     all_opts = dict(args._get_kwargs())
