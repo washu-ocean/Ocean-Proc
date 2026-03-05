@@ -186,13 +186,12 @@ def even_fmap_pairing(localizer_group: dict) -> tuple:
 @debug_logging
 def map_fmap_to_func(subject:str,
                      session:str,
-                     bids_path:Path,
+                     layout:BIDSLayout,
                      allow_uneven_fmap_groups: bool = False,
                      extract_best_fmap: bool = False):
     
     logger.info("####### Pairing field maps to functional runs #######\n")
 
-    layout = BIDSLayout(bids_path, validate=False)
     groups = dict()
     get_func_from_bids(bids_layout=layout,
                        subject=subject,
