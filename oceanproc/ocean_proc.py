@@ -41,6 +41,31 @@ def make_work_directory(dir_path:Path, subject:str, session:str) -> Path:
 
 
 def main():
+
+    def ExistingPath(path):
+        p = Path(path)
+        if not p.exists():
+            raise argparse.ArgumentTypeError(
+                f"path string <{path}> does not represent an existing path"
+            )
+        return p.resolve()
+
+    def ExistingDir(path):
+        p = ExistingPath(path)
+        if not p.is_dir():
+            raise argparse.ArgumentTypeError(
+                f"path string <{path}> does not represent an existing directory"
+            )
+        return p
+
+    def ExistingFile(path):
+        p = ExistingPath(path)
+        if not p.is_file():
+            raise argparse.ArgumentTypeError(
+                f"path string <{path}> does not represent an existing file"
+            )
+        return p
+    
     parser = OceanParser(
         prog="oceanproc",
         description="Ocean Labs adult MRI preprocessing",
@@ -58,13 +83,13 @@ def main():
                               help="The identifier of the subject to preprocess")
     session_args.add_argument("--session", "-se", required=True,
                               help="The identifier of the session to preprocess")
-    session_args.add_argument("--source_data", "-sd", type=Path,
+    session_args.add_argument("--source_data", "-sd", type=ExistingDir,
                               help="The path to the directory containing the raw DICOM files for this subject and session")
     session_args.add_argument("--skip_dcm2bids", action="store_true",
                               help="Flag to indicate that dcm2bids does not need to be run for this subject and session")
-    session_args.add_argument("--usability_file", "-u", type=Path,
+    session_args.add_argument("--usability_file", "-u", type=ExistingFile,
                               help="The path to the usability file for this subject and session; this file can be either be an xml or json file. All runs will be used if no file is provided.")
-    session_args.add_argument("--longitudinal", "-lg", type=Path, nargs="+", action="append",
+    session_args.add_argument("--longitudinal", "-lg", type=ExistingPath, nargs="+", action="append",
                               help="Addtional sourcedata and usability pair to include with this BIDs subject and session")
     session_args.add_argument("--skip_fmap_pairing", action="store_true",
                               help="Flag to indicate that the pairing of fieldmaps to BOLD runs does not need to be performed for this subject and session")
@@ -80,19 +105,19 @@ def main():
                               help="Flag to stop the deletion of the fMRIPrep working directory")
     session_args.add_argument("--debug_mode", action="store_true",
                               help="Flag to run the program in debug mode for more verbose logging")
-    session_args.add_argument("--fmap_pairing_file", type=Path,
+    session_args.add_argument("--fmap_pairing_file", type=ExistingFile,
                               help="Path to JSON containing info on how to pair fieldmaps to BOLD runs.")
 
-    config_args.add_argument("--bids_path", "-b", type=Path, required=True,
+    config_args.add_argument("--bids_path", "-b", type=ExistingDir, required=True,
                              help="The path to the directory containing the raw nifti data for all subjects, in BIDS format")
-    config_args.add_argument("--derivs_path", "-d", type=Path, required=True,
+    config_args.add_argument("--derivs_path", "-d", type=ExistingDir, required=True,
                              help="The path to the BIDS formated derivatives directory for this subject")
     config_args.add_argument("--derivs_subfolder", "-ds", default=None,
                              help=f"""The subfolder in the derivatives directory where bids style outputs should be stored. 
                                   The default is {adult_defaults.derivs_subfolder} or {infant_defaults.derivs_subfolder} if the '--infant' flag is set.""")
-    config_args.add_argument("--bids_config", "-c", type=Path, required=True,
+    config_args.add_argument("--bids_config", "-c", type=ExistingFile, required=True,
                              help="The path to the dcm2bids config file to use for this subject and session")
-    config_args.add_argument("--nordic_config", "-n", type=Path,
+    config_args.add_argument("--nordic_config", "-n", type=ExistingFile,
                              help="The path to the second dcm2bids config file to use for this subject and session. This implies that the session contains NORDIC data")
     config_args.add_argument("--nifti", action=argparse.BooleanOptionalAction,
                              help="Flag to specify that the source directory contains files of type NIFTI (.nii/.jsons) instead of DICOM")
@@ -102,41 +127,43 @@ def main():
                              help="framewise displacement threshold (in mm) to determine outlier framee (Default is 0.9).")
     config_args.add_argument("--skip_bids_validation", action=argparse.BooleanOptionalAction,
                              help="Specifies skipping BIDS validation (only enabled for fMRIprep step)")
-    config_args.add_argument("--fs_subjects_dir", "-fs", type=Path,
+    config_args.add_argument("--fs_subjects_dir", "-fs", type=ExistingDir,
                              help="The path to the directory that contains previous FreeSurfer outputs/derivatives to use for fMRIPrep. If empty, this is the path where new FreeSurfer outputs will be stored.")
     config_args.add_argument("--allow_uneven_fmap_groups", action="store_true",
                              help="Flag to allow for automated fieldmap pairing when there's more AP- than PA-encoded fieldmaps, or vice versa (will still error out if at least one of each is not present.)")
     config_args.add_argument("--extract_best_fmap", action="store_true",
                              help="Flag to specify that the lowest variance fieldmap volume should be extracted from each fieldmap, and used for distortion correction (opposed to all volumes being used)")
-    config_args.add_argument("--dscans_path", type=Path,
+    config_args.add_argument("--dscans_path", type=ExistingDir,
                              help="""The path to the directory containing 'dscans' files for inserting dummy scans into bold runs. Must be named exactly as corresponding bold image except with 'dscans' as 
                              the suffix and '.tsv' as the extension. Contents of the file must be a column, titled 'dummy_scan', with ones and zeros. Ones denote which frames should be dummy scans.""")
     config_args.add_argument("--precomputed_derivatives", "-pd", type="Full-Path", dest="derivatives", nargs="*",
                              help="A list of paths to any BIDS-style precomputed derivatives that should be used in preprocessing. (Ex. /path/to/bibsnet)")
-    config_args.add_argument("--work_dir", "-w", type=Path, required=True,
+    config_args.add_argument("--work_dir", "-w", type=ExistingDir, required=True,
                              help="The path to the working directory used to store intermediate files")
-    config_args.add_argument("--fs_license", "-l", type=Path, required=True,
+    config_args.add_argument("--fs_license", "-l", type=ExistingFile, required=True,
                              help="The path to the license file for the local installation of FreeSurfer")
     config_args.add_argument("--image_version", "-iv", default=None,
                              help=f"""The version of fmriprep to use; It is reccomended that an entire study use the same version. 
                                   The default is {adult_defaults.image_version} or {infant_defaults.image_version} if the '--infant' flag is set.""")
     config_args.add_argument("--infant", "-I", action=argparse.BooleanOptionalAction,
                              help="Flag to specify that NiBabies should be used instead of fMRIPrep")
-    config_args.add_argument("--bibsnet_image_path", "-bi", type=Path,
+    config_args.add_argument("--preproc_image_path", "-pi", type=ExistingFile,
+                             help="Path to a fMRIPrep or NiBabies apptainer image to use for preprocessing. If provided, this apptainer image will be used instead of docker. (NiBabies images should still be used with the '--infant' flag)")
+    config_args.add_argument("--bibsnet_image_path", "-bi", type=ExistingFile,
                              help="Path to the BIBSnet apptainer image to use for segmentation. If provided, BIBSnet segmentation will be run and the outputs will be used for preprocessing. (Must be used with the '--infant' flag)")
-    config_args.add_argument("--bibsnet_work", "-bw", type=Path,
+    config_args.add_argument("--bibsnet_work", "-bw", type=ExistingDir,
                              help="The path to the working directory used to store intermediate files for BIBSnet")
     args, unknown_args = parser.parse_known_args()
 
-    try:
-        assert args.derivs_path.is_dir(), "Derivatives directory must exist but it cannot be found"
-        assert args.bids_path.is_dir(), "Raw Bids directory must exist but it cannot be found"
-        if not args.skip_dcm2bids:
-            assert args.source_data.is_dir(), "Source data directory must exist but it cannot be found"
-        assert args.work_dir.is_dir(), "Work directroy must exist but it cannot be found"
-    except AssertionError as e:
-        logger.exception(e)
-        parser.error(e)
+    # try:
+    #     assert args.derivs_path.is_dir(), "Derivatives directory must exist but it cannot be found"
+    #     assert args.bids_path.is_dir(), "Raw Bids directory must exist but it cannot be found"
+    #     if not args.skip_dcm2bids:
+    #         assert args.source_data.is_dir(), "Source data directory must exist but it cannot be found"
+    #     assert args.work_dir.is_dir(), "Work directroy must exist but it cannot be found"
+    # except AssertionError as e:
+    #     logger.exception(e)
+    #     parser.error(e)
 
     defaults = infant_defaults if args.infant else adult_defaults
     for k,v in defaults.__dict__.items():
@@ -152,8 +179,8 @@ def main():
         elif bibsnet_path not in args.derivatives:
             args.derivatives.append(bibsnet_path)
 
-    if args.bibsnet_work and (not args.bibsnet_work.exists()):
-        parser.error("BIBSnet working directory must exist but it cannot be found")
+    # if args.bibsnet_work and (not args.bibsnet_work.exists()):
+    #     parser.error("BIBSnet working directory must exist but it cannot be found")
 
     if args.longitudinal:
         for lg_group in args.longitudinal:
@@ -168,6 +195,12 @@ def main():
                 parser.error(f"longitudinal argument cannot have more than 2 elements: {lg_group}")
 
     preproc_image = f"{defaults.image_name}:{args.image_version}"
+    if args.preproc_image_path:
+        # if not args.preproc_image_path.exists():
+        #     parser.error(f"Cannot find the preprocessing apptainer image at the path: {args.preproc_image_path}")
+        flags.apptainer = True
+        preproc_image = args.preproc_image_path
+
     preproc_derivs_path = args.derivs_path / args.derivs_subfolder
 
     log_dir = preproc_derivs_path / f"sub-{args.subject}/log"
@@ -262,7 +295,7 @@ def main():
             map_fmap_to_func(
                 subject=args.subject,
                 session=args.session,
-                bids_layout=bids_layout,
+                layout=bids_layout,
                 # xml_path=xml_data_path,
                 allow_uneven_fmap_groups=args.allow_uneven_fmap_groups,
                 extract_best_fmap=args.extract_best_fmap
