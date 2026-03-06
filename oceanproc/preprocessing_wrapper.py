@@ -77,6 +77,15 @@ def run_preprocessing(subject:str,
     elif not derivs_path.exists():
         exit_program_early(f"Derivatives path {derivs_path} does not exist.")
     
+    if flags.apptainer:
+        cmd_prelude = "apptainer run --nv --cleanenv --no-mount cwd"
+        mount_flag = "-B"
+    else:
+        uid = Popen(["id", "-u"], stdout=PIPE).stdout.read().decode("utf-8").strip()
+        gid = Popen(["id", "-g"], stdout=PIPE).stdout.read().decode("utf-8").strip()
+        cmd_prelude = f"docker run --rm -i -u {uid}:{gid}"
+        mount_flag = "-v"
+
     additional_mount_paths = []
     additional_mount_args = []
     mount_dex = 1
@@ -84,29 +93,26 @@ def run_preprocessing(subject:str,
         arg_vals = [k]
         if isinstance(v, list):
             for sub_v in v:
-                additional_mount_paths.append(f"-v {sub_v.resolve()}:/deriv{mount_dex}")
+                additional_mount_paths.append(f"{mount_flag} {sub_v.resolve()}:/deriv{mount_dex}")
                 arg_vals.append(f"/deriv{mount_dex}")
                 mount_dex += 1
         else:
-            additional_mount_paths.append(f"-v {v.resolve()}:/deriv{mount_dex}")
+            additional_mount_paths.append(f"{mount_flag} {v.resolve()}:/deriv{mount_dex}")
             arg_vals.append(f"/deriv{mount_dex}")
             mount_dex += 1
         additional_mount_args.append(" ".join(arg_vals))
     additional_mount_paths = " ".join(additional_mount_paths)
     additional_mount_args = " ".join(additional_mount_args)
 
-    uid = Popen(["id", "-u"], stdout=PIPE).stdout.read().decode("utf-8").strip()
-    gid = Popen(["id", "-g"], stdout=PIPE).stdout.read().decode("utf-8").strip()
-
     license_mount = "/opt/freesurfer/license.txt"
     bids_mount = "/data"
     derivs_mount = "/out"
     work_mount = "/work"
-    preproc_command = f"""docker run --rm -i -u {uid}:{gid}
-                            -v {license_file.resolve()}:{license_mount}:ro
-                            -v {bids_path.resolve()}:{bids_mount}:ro
-                            -v {derivs_path.resolve()}:{derivs_mount}
-                            -v {work_path.resolve()}:{work_mount}
+    preproc_command = f"""{cmd_prelude}
+                            {mount_flag} {license_file.resolve()}:{license_mount}:ro
+                            {mount_flag} {bids_path.resolve()}:{bids_mount}:ro
+                            {mount_flag} {derivs_path.resolve()}:{derivs_mount}
+                            {mount_flag} {work_path.resolve()}:{work_mount}
                             {additional_mount_paths}
                             {image_name} {bids_mount} {derivs_mount} participant
                             --participant-label {subject} 
@@ -242,6 +248,9 @@ def insert_dummy_frames(subject:str,
     dscans_suffix = "dscans"
     dscans_path_pattern = "sub-{subject}[/ses-{session}]/{datatype<func|meg|beh>|func}/sub-{subject}[_ses-{session}]_task-{task}[_acq-{acquisition}][_rec-{reconstruction}][_run-{run}][_echo-{echo}][_recording-{recording}]_{suffix<"+dscans_suffix+">}{extension<.tsv|.json>|.tsv}"
 
+    log_linebreak()
+    logger.info(f"####### Inserting Dummy Scans #######\n")
+
     # find all bold files
     func_files = bids_layout.get(subject=subject, session=session, suffix="bold", datatype="func", extension="nii.gz")
     for bfile in func_files:
@@ -252,30 +261,32 @@ def insert_dummy_frames(subject:str,
         dscans_bids_path = bids_layout.build_path(dscans_entities, path_patterns=[dscans_path_pattern], validate=False)
         dscans_file = sorted(dscan_dir.glob(Path(dscans_bids_path).name))
         if len(dscans_file) > 1:
-            exit_program_early(f"Found more than one 'dscans' file for bold run {bfile} --> {dscans_file}")
+            exit_program_early(f"Found more than one dscans file for bold run {bfile} --> {dscans_file}")
         elif len(dscans_file) == 0:
-            logger.info(f"Did not find any 'dscans' files for bold run: {bfile}, file will remain unmodified.")
+            logger.info(f"Did not find any dscans files for bold run: {bfile}, file will remain unmodified.")
             continue
         dscans_file = dscans_file[0]
-        logger.info(f"found 'dscans' file <{dscans_file.name}> for bold run <{bfile.filename}>")
+        logger.info(f"found dscans file <{dscans_file.name}> for bold run <{bfile.filename}>")
 
         dscans_list = pd.read_csv(dscans_file, sep="\t").loc[:, "dummy_scan"].to_numpy().astype(np.int32)
         bold_img = nib.load(bfile.path)
         num_bold_frames = bold_img.shape[3]
         num_dummy_scans = np.sum(dscans_list > 0)
         num_non_dummy = np.sum(dscans_list == 0)
-        # validate length
-        if num_bold_frames != num_non_dummy:
-            exit_program_early(f"Length of non-dummy scans and bold data do not match. # non-dummy scans: {num_non_dummy}, # bold frames: {num_bold_frames}")
 
-        logger.info(f"inserting {num_dummy_scans} dummy scans into the bold run")
+        # validate length
+        if len(dscans_list) == num_bold_frames:
+            logger.info(f"  dsans file and bold image have the same length. Dummy scans may have already been inserted or length of dscans file is incorrect. Bold file will remain unmodified.")
+            continue
+        elif num_bold_frames != num_non_dummy:
+            exit_program_early(f"Number of non-dummy scans and length of bold data do not match. # non-dummy scans: {num_non_dummy}, # bold frames: {num_bold_frames}")
+
+        logger.info(f"  inserting {num_dummy_scans} dummy scans into the bold run")
         # create a new bold series with dummy scans inserted
         bold_data = bold_img.get_fdata()
         frame_list = []
         dscans_index = 0
         for f in range(num_bold_frames):
-            print("f: " + str(f))
-            print("dex:" + str(dscans_index))
             copy_dex = f-1 if f > 0 else f
             while dscans_list[dscans_index] != 0:
                 frame_list.append(bold_data[:,:,:,copy_dex])
@@ -283,7 +294,7 @@ def insert_dummy_frames(subject:str,
             frame_list.append(bold_data[:,:,:,f])
             dscans_index += 1
             # check if end of run needs to be extended
-            if (f == num_bold_frames-1) and (dscans_list[dscans_index] == 1):
+            if (f == num_bold_frames-1) and (dscans_index < len(dscans_list)):
                 while dscans_index < len(dscans_list):
                     frame_list.append(bold_data[:,:,:,f])
                     dscans_index += 1
@@ -294,7 +305,7 @@ def insert_dummy_frames(subject:str,
         # save new image
         extended_bold_data = np.stack(frame_list, axis=3)
         extended_bold_img = bold_img.__class__(extended_bold_data, header=bold_img.header, affine=bold_img.affine)
-        logger.info(f"saving extended bold image")
+        logger.info(f"  saving extended bold image")
         nib.save(extended_bold_img, bfile.path)
     
 
