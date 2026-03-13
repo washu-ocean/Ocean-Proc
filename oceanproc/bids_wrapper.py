@@ -182,19 +182,6 @@ def run_dcm2niix(source_dir:Path,
         exit_program_early(f"Problem running '{title}'.",
                            exit_func=clean_up_func if clean_up_func else None)
 
-    # Delete or move extra files from short runs
-    files_to_remove = list(tmp_nifti_dir.glob("*a.nii.gz")) + list(tmp_nifti_dir.glob("*a.json")) + list(tmp_nifti_dir.glob(f"10[0-9][0-9]_{source_dir.name}*"))
-    if flags.debug:
-        unused_files_dir = tmp_nifti_dir.parent / f"{tmp_nifti_dir.name}_unused"
-        unused_files_dir.mkdir(exist_ok=True)
-        logger.debug(f"moving some unused files and files created from shortened runs to directory {unused_files_dir}")
-        for f in files_to_remove:
-            shutil.move(f.resolve(), (unused_files_dir / f.name).resolve())
-    else:
-        logger.info(f"removing some unused files and files created from shortened runs :\n  {[str(f) for f in files_to_remove]}")
-        for f in files_to_remove:
-            os.remove(f)
-
 
 def get_usability_from_file(usability_file:Path):
     quality_pairs = {}
@@ -310,7 +297,8 @@ def dicom_to_bids(subject:str,
                   nifti:bool = False,
                   skip_validate:bool = False,
                   skip_prompt:bool = False,
-                  session_index:int = 0):
+                  session_index:int = 0,
+                  keep_all_niftis:bool = False):
     """
     Facilitates the conversion of DICOM data into NIFTI data in BIDS format, and the removal of data marked 'unusable'.
 
@@ -346,32 +334,71 @@ def dicom_to_bids(subject:str,
         else:
             return
 
-    tmp_path = bids_dir / f"tmp_dcm2bids/sub-{subject}_ses-{session}"
+    tmp_nifti_path = bids_dir / f"tmp_dcm2bids/sub-{subject}_ses-{session}"
 
     def clean_up(quiet=False):
         try:
-            logger.debug(f"removing the temporary directory used by dcm2bids: {tmp_path}")
-            shutil.rmtree(tmp_path)
+            logger.debug(f"removing the temporary directory used by dcm2bids: {tmp_nifti_path}")
+            shutil.rmtree(tmp_nifti_path)
         except Exception:
             if not quiet:
-                logger.warning(f"There was a problem deleting the temporary directory at {tmp_path}")
+                logger.warning(f"There was a problem deleting the temporary directory at {tmp_nifti_path}")
 
-    nifti_path = None
     clean_up(quiet=True)
     if not nifti:
         run_dcm2niix(source_dir=source_dir,
-                     tmp_nifti_dir=tmp_path)
-        nifti_path = tmp_path
+                     tmp_nifti_dir=tmp_nifti_path)
     else:
-        nifti_path = source_dir
+        # copy current niftis to tmp_nifti_path 
+        logger.info(f"copying the source NIFTI files to tmp directory, {tmp_nifti_path}")
+        shutil.copytree(source_dir.resolve(), tmp_nifti_path.resolve())
 
-    add_information_to_sidecar(nifti_dir=nifti_path,
+
+    # filter out know 'weird' files that can be created during conversion
+    if not keep_all_niftis:
+        files_to_remove = []
+        short_runs = list(tmp_nifti_path.glob("[!.]*[a-z].nii*")) + list(tmp_nifti_path.glob("[!.]*[a-z].json"))
+        for sr in short_runs:
+            suffix = None
+            if sr.name.endswith(".nii.gz"):
+                suffix = ".nii.gz"
+            elif sr.name.endswith(".nii"):
+                suffix = ".nii"
+            elif sr.name.endswith(".json"):
+                suffix = ".json"
+            else:
+                continue
+            if (sr.parent / f"{sr.name.removesuffix(suffix)[:-1]}{suffix}").exists():
+                files_to_remove.append(sr)
+
+        for jf in tmp_nifti_path.glob("[!.]*.json"):
+            with open(jf, "r") as f:
+                jd = json.load(f)
+                if int(jd["SeriesNumber"]) > 1000:
+                    files_to_remove.extend(list(tmp_nifti_path.glob(f"{jf.stem}.*")))
+
+        if len(files_to_remove) > 0:
+            logger.info("filtering out NIFTI files")
+            file_list_string = '\n\t'.join([str(f) for f in files_to_remove])
+            if flags.debug:
+                unused_files_dir = tmp_nifti_path.parent / f"{tmp_nifti_path.name}_unused"
+                unused_files_dir.mkdir(exist_ok=True)
+                logger.debug(f"moving some unused files and files created from shortened runs to directory {unused_files_dir}:\n\t{file_list_string}")
+                for f in files_to_remove:
+                    shutil.move(f.resolve(), (unused_files_dir / f.name).resolve())
+            else:
+                file_list_string = '\n\t'.join([str(f) for f in files_to_remove])
+                logger.info(f"removing some unused files and files created from shortened runs :\n\t{file_list_string}")
+                for f in files_to_remove:
+                    os.remove(f)
+
+    add_information_to_sidecar(nifti_dir=tmp_nifti_path,
                                usability_file=usability_file,
                                session_number=session_index)
 
     run_dcm2bids(subject=subject,
                  session=session,
-                 nifti_dir=nifti_path,
+                 nifti_dir=tmp_nifti_path,
                  bids_output_dir=bids_dir,
                  config_file=bids_config,
                  nordic_config=nordic_config,

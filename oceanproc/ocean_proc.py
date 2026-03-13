@@ -121,6 +121,8 @@ def main():
                              help="The path to the second dcm2bids config file to use for this subject and session. This implies that the session contains NORDIC data")
     config_args.add_argument("--nifti", action=argparse.BooleanOptionalAction,
                              help="Flag to specify that the source directory contains files of type NIFTI (.nii/.jsons) instead of DICOM")
+    config_args.add_argument("--keep_all_niftis", action=argparse.BooleanOptionalAction,
+                             help="Oceanproc will try its best to remove 'weird' NIFTI files that can be introduced during conversion from DICOM. This flag specifies that oceanproc should not do that and keep all of the files instead.")
     config_args.add_argument("--anat_only", action=argparse.BooleanOptionalAction,
                              help="Flag to specify only anatomical images should be processed.")
     config_args.add_argument("--fd_spike_threshold", "-fd", type=float, default=0.9,
@@ -258,7 +260,8 @@ def main():
                 nifti=args.nifti,
                 skip_validate=args.skip_bids_validation,
                 skip_prompt=index > 0,
-                session_index=index
+                session_index=index,
+                keep_all_niftis=args.keep_all_niftis
             )
             if index > 0:
                 extend_session(subject=args.subject,

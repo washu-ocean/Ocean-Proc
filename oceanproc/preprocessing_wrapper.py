@@ -256,16 +256,27 @@ def insert_dummy_frames(subject:str,
     for bfile in func_files:
         if not Path(bfile.path).exists:
             continue
+
         # Find the dscans file for bold run
+        try_find = True
         dscans_entities = bids_layout.parse_file_entities(bfile.path) | {"suffix":dscans_suffix, "extension":".tsv"}
-        dscans_bids_path = bids_layout.build_path(dscans_entities, path_patterns=[dscans_path_pattern], validate=False)
-        dscans_file = sorted(dscan_dir.glob(Path(dscans_bids_path).name))
-        if len(dscans_file) > 1:
-            exit_program_early(f"Found more than one dscans file for bold run {bfile} --> {dscans_file}")
-        elif len(dscans_file) == 0:
+        while try_find:
+            dscans_bids_path = bids_layout.build_path(dscans_entities, path_patterns=[dscans_path_pattern], validate=False)
+            dscans_file = sorted(dscan_dir.glob(Path(dscans_bids_path).name))
+            if len(dscans_file) > 1:
+                exit_program_early(f"Found more than one dscans file for bold run {bfile} --> {dscans_file}")
+            elif len(dscans_file) == 1:
+                try_find = False
+            if ("echo" in dscans_entities) and try_find:
+                del dscans_entities["echo"]
+            else:
+                try_find = False
+
+        if len(dscans_file) == 0:
             logger.info(f"Did not find any dscans files for bold run: {bfile}, file will remain unmodified.")
             continue
-        dscans_file = dscans_file[0]
+        else:
+            dscans_file = dscans_file[0]
         logger.info(f"found dscans file <{dscans_file.name}> for bold run <{bfile.filename}>")
 
         dscans_list = pd.read_csv(dscans_file, sep="\t").loc[:, "dummy_scan"].to_numpy().astype(np.int32)
