@@ -76,9 +76,14 @@ def run_preprocessing(subject:str,
         exit_program_early(f"Bids path {bids_path} does not exist.")
     elif not derivs_path.exists():
         exit_program_early(f"Derivatives path {derivs_path} does not exist.")
+
+    license_mount = "/opt/freesurfer/license.txt"
+    bids_mount = "/data"
+    derivs_mount = "/out"
+    work_mount = "/work"
     
     if flags.apptainer:
-        cmd_prelude = "apptainer run --nv --cleanenv --no-mount cwd"
+        cmd_prelude = f"apptainer run --nv --cleanenv --no-mount cwd --pwd {work_mount}"
         mount_flag = "-B"
     else:
         uid = Popen(["id", "-u"], stdout=PIPE).stdout.read().decode("utf-8").strip()
@@ -104,10 +109,6 @@ def run_preprocessing(subject:str,
     additional_mount_paths = " ".join(additional_mount_paths)
     additional_mount_args = " ".join(additional_mount_args)
 
-    license_mount = "/opt/freesurfer/license.txt"
-    bids_mount = "/data"
-    derivs_mount = "/out"
-    work_mount = "/work"
     preproc_command = f"""{cmd_prelude}
                             {mount_flag} {license_file.resolve()}:{license_mount}:ro
                             {mount_flag} {bids_path.resolve()}:{bids_mount}:ro
