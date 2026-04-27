@@ -275,7 +275,7 @@ def main():
         with open(bids_path / ".bidsignore", "r") as f:
             ignore_list.extend(f.readlines())
     ignore_list = list(set(ignore_list))
-    other_sub_paths = [p.name for p in bids_path.glob("sub-*") if args.subject not in p.name and p.is_dir()]
+    other_sub_paths = [p.name for p in bids_path.glob("sub-*") if f"sub-{args.subject}" != p.name and p.is_dir()]
     ignore_list.extend(other_sub_paths)
     bids_layout = BIDSLayout(args.bids_path, validate=False, indexer=BIDSLayoutIndexer(ignore=ignore_list, validate=False))
 
