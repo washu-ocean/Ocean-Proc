@@ -239,20 +239,21 @@ def prepare_subprocess_logging(this_logger,
 
 
 @debug_logging
-def run_subprocess(cmd: str, title: str):
+def run_subprocess(cmd: str, title: str, log_output=True):
     split_cmd = shlex.split(cmd)
     logger.info(f"running '{title}' with the following command: \n{' '.join(split_cmd)}\n")
     prepare_subprocess_logging(logger)
     with Popen(split_cmd, stdout=PIPE, stderr=PIPE) as p:
         while p.poll() == None:
-            for line in p.stdout:
-                logger.info(line.decode("utf-8", "ignore"))
-            for line in p.stderr:
-                logger.info(line.decode("utf-8", "ignore"))
+            if log_output:
+                for line in p.stdout:
+                    logger.info(line.decode("utf-8", "ignore"))
+                for line in p.stderr:
+                    logger.info(line.decode("utf-8", "ignore"))
         prepare_subprocess_logging(logger, stop=True)
         p.kill()
-        if p.poll() != 0:
-            raise RuntimeError(f"process -'{title}'- has ended with a non-zero exit code.")
+        if (ecode:=p.poll()) != 0:
+            raise RuntimeError(f"process -'{title}'- has ended with a non-zero exit code <{ecode}>.")
 
 
 def log_linebreak():
@@ -389,3 +390,30 @@ def parcellate_dtseries(dtseries_path: Path,
         exit_program_early(f"Program '{title}' has run into an error.")
 
     return ptseries_path
+
+def validate_permissions_string(permissions:str):
+    valid = True
+    if (len(permissions) != 3) or not permissions.isnumeric():
+        valid = False
+    if valid:
+        for character in permissions:
+            if int(character) > 7 or int(character) < 0:
+                valid = False
+
+    if not valid:
+        raise ValueError(f"Did not receive a valid permissions string: <{permissions}>")
+    
+
+def update_permissions(permissions:str, path:Path, recursive=False, group=None, quiet=False):
+    validate_permissions_string(permissions)
+    if not path.exists():
+        if quiet:
+            return
+        raise ValueError(f"Did not receive a valid path: <{path}>")
+    
+    chmod_cmd = f"chmod {'-R' if recursive else ''} {permissions} {path.resolve()}"
+    run_subprocess(cmd=chmod_cmd, title="chmod", log_output=False)
+
+    if group is not None:
+        chgrp_cmd = f"chgrp {'-R' if recursive else ''} {group} {path.resolve()}"
+        run_subprocess(cmd=chgrp_cmd, title="chgrp", log_output=False)

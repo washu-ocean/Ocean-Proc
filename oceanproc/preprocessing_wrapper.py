@@ -3,7 +3,7 @@
 from pathlib import Path
 import logging
 from bids import BIDSLayout
-from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess
+from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess, update_permissions
 import shutil
 from subprocess import Popen, PIPE
 from matplotlib import pyplot as plt
@@ -122,16 +122,19 @@ def run_preprocessing(subject:str,
                             {additional_mount_args}
                             {option_chain}"""
     
+    success = True
     try:
         run_subprocess(preproc_command, title=title)
     except RuntimeError as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early(f"Program '{title}' has run into an error.",
-                           None if flags.debug else clean_up)
+        success = False
+        # exit_program_early(f"Program '{title}' has run into an error.",
+        #                    None if flags.debug else clean_up)
     if not flags.debug:
         clean_up()
 
+    return success
 
 @debug_logging
 def add_fd_plot_to_report(subject:str,
@@ -356,7 +359,7 @@ def process_data(subject:str,
     option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
     preproc_title = "NiBabies" if flags.infant else "fMRIPrep"
 
-    run_preprocessing(subject=subject,
+    preproc_success = run_preprocessing(subject=subject,
                       session=session if flags.infant else None,
                       bids_path=bids_path,
                       derivs_path=derivs_path,
@@ -367,8 +370,27 @@ def process_data(subject:str,
                       option_chain=option_chain,
                       additional_mounts=additional_mounts,
                       remove_work_folder=remove_work_folder)
+    
+    if preproc_success:
+        add_fd_plot_to_report(subject=subject,
+                            session=session,
+                            derivs_path=derivs_path,
+                            title=preproc_title)
+    
+    # update file permissions for preprocessing outputs
+    update_permissions(
+        permissions=flags.file_permissions, 
+        path=derivs_path, 
+        recursive=True,
+        group=flags.permissions_group)
 
-    add_fd_plot_to_report(subject=subject,
-                          session=session,
-                          derivs_path=derivs_path,
-                          title=preproc_title)
+    # update file permisions for working directory file
+    update_permissions(
+        permissions=flags.file_permissions, 
+        path=work_path, 
+        recursive=True,
+        group=flags.permissions_group,
+        quiet=True)
+    
+    if not preproc_success:
+        exit_program_early(f"Program '{preproc_title}' has run into an error.")
