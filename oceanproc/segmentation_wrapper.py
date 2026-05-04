@@ -2,7 +2,8 @@
 
 from pathlib import Path
 import logging
-from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess
+from sre_constants import SUCCESS
+from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess, update_permissions
 import shutil
 from pathlib import Path
 
@@ -59,9 +60,6 @@ def run_bibsnet(subject:str,
     elif not bibsnet_image.exists():
         exit_program_early(f"BIBSnet image path {derivs_path} does not exist.")
 
-    # uid = Popen(["id", "-u"], stdout=PIPE).stdout.read().decode("utf-8").strip()
-    # gid = Popen(["id", "-g"], stdout=PIPE).stdout.read().decode("utf-8").strip()
-
     bids_mount = "/data"
     derivs_mount = "/out"
     work_mount = "/work"
@@ -75,16 +73,18 @@ def run_bibsnet(subject:str,
                             -w {work_mount} --verbose
                             {option_chain}"""
     
+    success = True
     try:
         run_subprocess(bibsnet_command, title="BIBSnet")
-    except RuntimeError as e:
+    except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early(f"Program 'BIBSnet' has run into an error.",
-                           None if flags.debug else clean_up)
+        success = False
+
     if not flags.debug:
         clean_up()
 
+    return success
 
 @debug_logging
 def segment_anatomical(subject:str,
@@ -116,7 +116,7 @@ def segment_anatomical(subject:str,
     """
     option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
 
-    run_bibsnet(subject=subject,
+    segment_success = run_bibsnet(subject=subject,
                       session=session,
                       bids_path=bids_path,
                       derivs_path=derivs_path,
@@ -124,5 +124,29 @@ def segment_anatomical(subject:str,
                       bibsnet_image=bibsnet_image,
                       option_chain=option_chain,
                       remove_work_folder=remove_work_folder)
+    
+    paths_to_update = sorted(derivs_path.glob(f"bibsnet/sub-{subject}*"))
+    paths_to_update.extend(sorted(work_path.glob(f"*/sub-{subject}*")))
+    for out_path in paths_to_update:
+        # update file permissions for segmentation outputs and working files
+        update_permissions(
+            permissions=flags.file_permissions, 
+            path=out_path, 
+            recursive=True,
+            group=flags.permissions_group)
+        
+    # check other top-level files
+    other_paths = [derivs_path/"dataset_description.json"]
+    for op in other_paths:
+        if op.exists() and (op.stat().st_uid == flags.uid):
+            update_permissions(
+                permissions=flags.file_permissions,
+                path=op,
+                recursive=True,
+                group=flags.permissions_group
+            )
+        
+    if not segment_success:
+        exit_program_early(f"Program 'BIBSnet' has run into an error.")
 
 

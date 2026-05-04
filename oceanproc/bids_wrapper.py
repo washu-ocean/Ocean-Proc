@@ -4,14 +4,12 @@ from argparse import ArgumentParser
 from pathlib import Path
 import json
 import os
-import re
 import shutil
-import subprocess
 from textwrap import dedent
 import xml.etree.ElementTree as et
-from .utils import exit_program_early, prompt_user_continue, prepare_subprocess_logging, debug_logging, log_linebreak, flags, run_subprocess
+from .utils import exit_program_early, prompt_user_continue, prepare_subprocess_logging, debug_logging, log_linebreak, flags, run_subprocess, update_permissions
 import logging
-from bids import BIDSLayout, BIDSLayoutIndexer
+from bids import BIDSLayout
 from bisect import bisect
 module_logger = logging.getLogger("fsspec")
 module_logger.setLevel(logging.CRITICAL)
@@ -136,16 +134,16 @@ def run_dcm2bids(subject:str,
                 logger.debug(f"deleting file: {f}")
                 os.remove(f)
 
-    except RuntimeError or subprocess.CalledProcessError as e:
+    except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early(f"Problem running '{title}'.")
+        return False
 
+    return True
 
 @debug_logging
 def run_dcm2niix(source_dir:Path,
-                 tmp_nifti_dir:Path,
-                 clean_up_func=None):
+                 tmp_nifti_dir:Path):
     """
     Run dcm2niix with the given input and output directories.
 
@@ -176,11 +174,12 @@ def run_dcm2niix(source_dir:Path,
         log_linebreak()
         logger.info("####### Converting DICOM files into NIFTI #######\n")
         run_subprocess(helper_command, title=title)
-    except RuntimeError or subprocess.CalledProcessError as e:
+    except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early(f"Problem running '{title}'.",
-                           exit_func=clean_up_func if clean_up_func else None)
+        return False
+    
+    return True
 
 
 def get_usability_from_file(usability_file:Path):
@@ -322,7 +321,8 @@ def dicom_to_bids(subject:str,
         if not p.exists():
             exit_program_early(f"Path {str(p)} does not exist.")
 
-    if (path_that_exists := bids_dir / f"sub-{subject}/ses-{session}").exists() and (not skip_prompt):
+    sub_ses_bids_dir = bids_dir / f"sub-{subject}/ses-{session}"
+    if sub_ses_bids_dir.exists() and (not skip_prompt):
         ans = prompt_user_continue(dedent("""
                                         A raw data bids path for this subject and session already exists.
                                         Would you like to delete its contents and rerun dcm2bids? If not,
@@ -330,7 +330,7 @@ def dicom_to_bids(subject:str,
                                             """))
         if ans:
             logger.debug("removing the old BIDS raw data directory and its contents")
-            shutil.rmtree(path_that_exists)
+            shutil.rmtree(sub_ses_bids_dir)
         else:
             return
 
@@ -345,16 +345,27 @@ def dicom_to_bids(subject:str,
                 logger.warning(f"There was a problem deleting the temporary directory at {tmp_nifti_path}")
 
     clean_up(quiet=True)
+    nii_success = True
     if not nifti:
-        run_dcm2niix(source_dir=source_dir,
-                     tmp_nifti_dir=tmp_nifti_path)
+        nii_success = run_dcm2niix(source_dir=source_dir,
+                                   tmp_nifti_dir=tmp_nifti_path)
     else:
         # copy current niftis to tmp_nifti_path 
         logger.info(f"copying the source NIFTI files to tmp directory, {tmp_nifti_path}")
         shutil.copytree(source_dir.resolve(), tmp_nifti_path.resolve())
 
+    # update the permissions on the nifti files
+    update_permissions(
+        permissions=flags.file_permissions,
+        path=tmp_nifti_path,
+        recursive=True,
+        group=flags.permissions_group
+    )
+    
+    if not nii_success:
+        exit_program_early(f"Problem running 'dcm2niix'")
 
-    # filter out know 'weird' files that can be created during conversion
+    # filter out known 'weird' files that can be created during conversion
     if not keep_all_niftis:
         files_to_remove = []
         short_runs = list(tmp_nifti_path.glob("[!.]*[a-z].nii*")) + list(tmp_nifti_path.glob("[!.]*[a-z].json"))
@@ -396,13 +407,24 @@ def dicom_to_bids(subject:str,
                                usability_file=usability_file,
                                session_number=session_index)
 
-    run_dcm2bids(subject=subject,
+    dcm2bids_success = run_dcm2bids(subject=subject,
                  session=session,
                  nifti_dir=tmp_nifti_path,
                  bids_output_dir=bids_dir,
                  config_file=bids_config,
                  nordic_config=nordic_config,
                  skip_validate=skip_validate)
+    
+    update_permissions(
+        permissions=flags.file_permissions,
+        path=sub_ses_bids_dir,
+        recursive=True,
+        group=flags.permissions_group,
+        quiet=True
+    )
+
+    if not dcm2bids_success:
+        exit_program_early(f"Problem running 'dcm2bids'")
 
     if not flags.debug:
         clean_up()

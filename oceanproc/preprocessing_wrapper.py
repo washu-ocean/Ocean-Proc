@@ -3,9 +3,8 @@
 from pathlib import Path
 import logging
 from bids import BIDSLayout
-from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess
+from .utils import exit_program_early, make_option, prepare_subprocess_logging, flags, debug_logging, log_linebreak, run_subprocess, update_permissions
 import shutil
-from subprocess import Popen, PIPE
 from matplotlib import pyplot as plt
 from bs4 import BeautifulSoup as bsoup
 import pandas as pd
@@ -85,10 +84,8 @@ def run_preprocessing(subject:str,
     if flags.apptainer:
         cmd_prelude = f"apptainer run --nv --cleanenv --no-mount cwd --pwd {work_mount}"
         mount_flag = "-B"
-    else:
-        uid = Popen(["id", "-u"], stdout=PIPE).stdout.read().decode("utf-8").strip()
-        gid = Popen(["id", "-g"], stdout=PIPE).stdout.read().decode("utf-8").strip()
-        cmd_prelude = f"docker run --rm -i -u {uid}:{gid}"
+    else: 
+        cmd_prelude = f"docker run --rm -i -u {flags.uid}:{flags.gid}"
         mount_flag = "-v"
 
     additional_mount_paths = []
@@ -122,16 +119,18 @@ def run_preprocessing(subject:str,
                             {additional_mount_args}
                             {option_chain}"""
     
+    success = True
     try:
         run_subprocess(preproc_command, title=title)
-    except RuntimeError as e:
+    except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
-        exit_program_early(f"Program '{title}' has run into an error.",
-                           None if flags.debug else clean_up)
+        success = False
+
     if not flags.debug:
         clean_up()
 
+    return success
 
 @debug_logging
 def add_fd_plot_to_report(subject:str,
@@ -356,7 +355,7 @@ def process_data(subject:str,
     option_chain = " ".join([make_option(v, key=k, delimeter=" ", convert_underscore=True) for k,v in kwargs.items()])
     preproc_title = "NiBabies" if flags.infant else "fMRIPrep"
 
-    run_preprocessing(subject=subject,
+    preproc_success = run_preprocessing(subject=subject,
                       session=session if flags.infant else None,
                       bids_path=bids_path,
                       derivs_path=derivs_path,
@@ -367,8 +366,44 @@ def process_data(subject:str,
                       option_chain=option_chain,
                       additional_mounts=additional_mounts,
                       remove_work_folder=remove_work_folder)
-
-    add_fd_plot_to_report(subject=subject,
-                          session=session,
-                          derivs_path=derivs_path,
-                          title=preproc_title)
+    
+    if preproc_success:
+        add_fd_plot_to_report(subject=subject,
+                            session=session,
+                            derivs_path=derivs_path,
+                            title=preproc_title)
+    
+    paths_to_update = []
+    paths_to_update.extend(sorted(derivs_path.glob(f"sub-{subject}*")))
+    paths_to_update.extend(sorted(derivs_path.glob(f"sourcedata/*/sub-{subject}*")))
+    for out_path in paths_to_update:
+        # update file permissions for preprocessing outputs
+        update_permissions(
+            permissions=flags.file_permissions, 
+            path=out_path, 
+            recursive=True,
+            group=flags.permissions_group
+        )
+        
+    # check other top-level files
+    other_paths = [derivs_path/"dataset_description.json", derivs_path/"logs"]
+    for op in other_paths:
+        if op.exists() and (op.stat().st_uid == flags.uid):
+            update_permissions(
+                permissions=flags.file_permissions,
+                path=op,
+                recursive=True,
+                group=flags.permissions_group
+            )
+            
+    # update file permisions for working directory files
+    update_permissions(
+        permissions=flags.file_permissions, 
+        path=work_path, 
+        recursive=True,
+        group=flags.permissions_group,
+        quiet=True
+    )
+    
+    if not preproc_success:
+        exit_program_early(f"Program '{preproc_title}' has run into an error.")

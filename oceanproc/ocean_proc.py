@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from ast import arg
 import sys
 from pathlib import Path
 import logging
@@ -10,10 +11,12 @@ from oceanproc.group_series import map_fmap_to_func, map_fmap_to_func_with_pairi
 from oceanproc.preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts, insert_dummy_frames
 from oceanproc.segmentation_wrapper import segmentation_args, segment_anatomical
 from oceanproc.events_long import create_events_and_confounds
-from oceanproc.utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option
+from oceanproc.utils import *
 from oceanproc.oceanparse import OceanParser
 from bids import BIDSLayout, BIDSLayoutIndexer
 import shutil
+import grp
+import os
 from textwrap import dedent
 
 logging.basicConfig(level=logging.INFO,
@@ -65,6 +68,32 @@ def main():
                 f"path string <{path}> does not represent an existing file"
             )
         return p
+
+    def ValidPermissions(permissions):
+        try:
+            validate_permissions_string(permissions)
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"permissions string <{permissions}> does not represent a valid permissions string"
+            )
+        return permissions
+
+    def ValidGroup(group):
+        try:
+            group_id = grp.getgrnam(group).gr_gid
+            valid_groups = os.getgroups()
+            if group_id not in valid_groups:
+                raise argparse.ArgumentTypeError(
+                    f"current user does not belong to group <{group}>"
+                )
+        except KeyError:
+            raise argparse.ArgumentTypeError(
+                f"group name <{group}> is not a valid system user group"
+            )
+        return group
+
+    default_user_group = grp.getgrgid(os.getgid()).gr_name
+    default_file_permissions = "771"
     
     parser = OceanParser(
         prog="oceanproc",
@@ -155,19 +184,16 @@ def main():
                              help="Path to the BIBSnet apptainer image to use for segmentation. If provided, BIBSnet segmentation will be run and the outputs will be used for preprocessing. (Must be used with the '--infant' flag)")
     config_args.add_argument("--bibsnet_work", "-bw", type=ExistingDir,
                              help="The path to the working directory used to store intermediate files for BIBSnet")
+    config_args.add_argument("--permissions_group", "-g", type=ValidGroup, default=default_user_group,
+                             help=f"The user group that should own all of the created files. (Default is for the current user is '{default_user_group}'")
+    config_args.add_argument("--file_permissions", "-fp", type=ValidPermissions, default=default_file_permissions,
+                             help=f"The file permissions that all output files should have, represented in numeric format. (Default permissions is '{default_file_permissions}'")
     args, unknown_args = parser.parse_known_args()
 
-    # try:
-    #     assert args.derivs_path.is_dir(), "Derivatives directory must exist but it cannot be found"
-    #     assert args.bids_path.is_dir(), "Raw Bids directory must exist but it cannot be found"
-    #     if not args.skip_dcm2bids:
-    #         assert args.source_data.is_dir(), "Source data directory must exist but it cannot be found"
-    #     assert args.work_dir.is_dir(), "Work directroy must exist but it cannot be found"
-    # except AssertionError as e:
-    #     logger.exception(e)
-    #     parser.error(e)
+    if args.infant:
+        flags.infant = True
 
-    defaults = infant_defaults if args.infant else adult_defaults
+    defaults = infant_defaults if flags.infant else adult_defaults
     for k,v in defaults.__dict__.items():
         if k in args.__dict__ and args.__dict__[k] is None:
             args.__dict__[k] = v
@@ -175,14 +201,11 @@ def main():
     unknown_args = extract_options(unknown_args)
 
     bibsnet_path = (args.derivs_path / "bibsnet").resolve()
-    if args.infant and args.bibsnet_image_path:
+    if flags.infant and args.bibsnet_image_path:
         if args.derivatives is None:
             args.derivatives = [bibsnet_path]
         elif bibsnet_path not in args.derivatives:
             args.derivatives.append(bibsnet_path)
-
-    # if args.bibsnet_work and (not args.bibsnet_work.exists()):
-    #     parser.error("BIBSnet working directory must exist but it cannot be found")
 
     if args.longitudinal:
         for lg_group in args.longitudinal:
@@ -195,11 +218,10 @@ def main():
                     parser.error(f"usability file must be a .xml or .json file, and it must exist: {lg_group[1]}")
             else:
                 parser.error(f"longitudinal argument cannot have more than 2 elements: {lg_group}")
+        flags.longitudinal = True
 
     preproc_image = f"{defaults.image_name}:{args.image_version}"
     if args.preproc_image_path:
-        # if not args.preproc_image_path.exists():
-        #     parser.error(f"Cannot find the preprocessing apptainer image at the path: {args.preproc_image_path}")
         flags.apptainer = True
         preproc_image = args.preproc_image_path
 
@@ -212,6 +234,11 @@ def main():
     if args.debug_mode:
         flags.debug = True
         logger.setLevel(logging.DEBUG)
+    
+    flags.file_permissions = args.file_permissions
+    flags.permissions_group = args.permissions_group
+    flags.gid = grp.getgrnam(flags.permissions_group).gr_gid
+    flags.uid = os.getuid()
 
     logger.info("Starting oceanproc...")
     logger.info(f"Log will be stored at {log_path}")
@@ -222,14 +249,11 @@ def main():
             assert args.export_args.parent.exists() and args.export_args.suffix, "Argument export path must be a file path in a directory that exists"
             logger.info(f"####### Exporting Configuration Arguments to: '{args.export_args}' #######")
             export_args_to_file(args, config_args, args.export_args, extra_args=unknown_args)
+            update_permissions(permissions=flags.file_permissions, path=args.export_args, group=flags.permissions_group)
         except Exception as e:
             logger.exception(e)
             exit_program_early(e)
 
-    if args.longitudinal:
-        flags.longitudinal = True
-    if args.infant:
-        flags.infant = True
 
     # log the input arguments
     for k,v in (dict(args._get_kwargs())).items():
@@ -304,7 +328,6 @@ def main():
                 subject=args.subject,
                 session=args.session,
                 layout=bids_layout,
-                # xml_path=xml_data_path,
                 allow_uneven_fmap_groups=args.allow_uneven_fmap_groups,
                 extract_best_fmap=args.extract_best_fmap
             )
@@ -364,7 +387,7 @@ def main():
         )
 
     ##### Create long formatted event files #####
-    if not args.skip_event_files:
+    if not args.skip_event_files and not args.anat_only:
         create_events_and_confounds(
             bids_path=args.bids_path,
             derivs_path=preproc_derivs_path,
