@@ -4,14 +4,12 @@ from argparse import ArgumentParser
 from pathlib import Path
 import json
 import os
-import re
 import shutil
-import subprocess
 from textwrap import dedent
 import xml.etree.ElementTree as et
 from .utils import exit_program_early, prompt_user_continue, prepare_subprocess_logging, debug_logging, log_linebreak, flags, run_subprocess, update_permissions
 import logging
-from bids import BIDSLayout, BIDSLayoutIndexer
+from bids import BIDSLayout
 from bisect import bisect
 module_logger = logging.getLogger("fsspec")
 module_logger.setLevel(logging.CRITICAL)

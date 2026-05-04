@@ -12,7 +12,6 @@ import numpy as np
 import nibabel as nib
 import json
 import os
-import grp
 import copy
 from types import SimpleNamespace
 
