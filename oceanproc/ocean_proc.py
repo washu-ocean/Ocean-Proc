@@ -185,9 +185,9 @@ def main():
     config_args.add_argument("--bibsnet_work", "-bw", type=ExistingDir,
                              help="The path to the working directory used to store intermediate files for BIBSnet")
     config_args.add_argument("--permissions_group", "-g", type=ValidGroup, default=default_user_group,
-                             help=f"The user group that should own all of the created files. (Default is for the current user is '{default_user_group}'")
+                             help=f"The user group that should own all of the created files. (Default for the current user is '{default_user_group}')")
     config_args.add_argument("--file_permissions", "-fp", type=ValidPermissions, default=default_file_permissions,
-                             help=f"The file permissions that all output files should have, represented in numeric format. (Default permissions is '{default_file_permissions}'")
+                             help=f"The file permissions that all output files should have, represented in numeric format. (Default permissions is '{default_file_permissions}')")
     args, unknown_args = parser.parse_known_args()
 
     if args.infant:
