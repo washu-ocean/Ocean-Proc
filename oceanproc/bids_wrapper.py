@@ -136,11 +136,10 @@ def run_dcm2bids(subject:str,
                 logger.debug(f"deleting file: {f}")
                 os.remove(f)
 
-    except RuntimeError or subprocess.CalledProcessError as e:
+    except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
         return False
-        # exit_program_early(f"Problem running '{title}'.")
 
     return True
 
@@ -177,7 +176,7 @@ def run_dcm2niix(source_dir:Path,
         log_linebreak()
         logger.info("####### Converting DICOM files into NIFTI #######\n")
         run_subprocess(helper_command, title=title)
-    except Exception as e:
+    except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
         return False
@@ -410,7 +409,7 @@ def dicom_to_bids(subject:str,
                                usability_file=usability_file,
                                session_number=session_index)
 
-    run_dcm2bids(subject=subject,
+    dcm2bids_success = run_dcm2bids(subject=subject,
                  session=session,
                  nifti_dir=tmp_nifti_path,
                  bids_output_dir=bids_dir,
@@ -422,8 +421,12 @@ def dicom_to_bids(subject:str,
         permissions=flags.file_permissions,
         path=sub_ses_bids_dir,
         recursive=True,
-        group=flags.permissions_group
+        group=flags.permissions_group,
+        quiet=True
     )
+
+    if not dcm2bids_success:
+        exit_program_early(f"Problem running 'dcm2bids'")
 
     if not flags.debug:
         clean_up()
