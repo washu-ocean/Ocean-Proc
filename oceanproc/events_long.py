@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import nibabel as nib
 import json
-from .utils import exit_program_early, debug_logging, log_linebreak
+from .utils import exit_program_early, debug_logging, log_linebreak, update_permissions, flags
 from pathlib import Path
 import logging
 
@@ -162,6 +162,11 @@ def create_events_and_confounds(bids_path:Path, derivs_path:Path, sub:str, ses:s
                          output_file=event_file_out)
         append_to_confounds(confounds_file=confounds_file, 
                             fd_thresh=fd_thresh)
+        update_permissions(
+            permissions=flags.file_permissions,
+            path=event_file_out,
+            group=flags.permissions_group
+        )
         
 
 

@@ -11,7 +11,7 @@ from oceanproc.group_series import map_fmap_to_func, map_fmap_to_func_with_pairi
 from oceanproc.preprocessing_wrapper import process_data, adult_defaults, infant_defaults, mount_opts, insert_dummy_frames
 from oceanproc.segmentation_wrapper import segmentation_args, segment_anatomical
 from oceanproc.events_long import create_events_and_confounds
-from oceanproc.utils import exit_program_early, prompt_user_continue, default_log_format, add_file_handler, export_args_to_file, flags, debug_logging, log_linebreak, extract_options, make_option, update_permissions, validate_permissions_string
+from oceanproc.utils import *
 from oceanproc.oceanparse import OceanParser
 from bids import BIDSLayout, BIDSLayoutIndexer
 import shutil
@@ -90,9 +90,10 @@ def main():
             raise argparse.ArgumentTypeError(
                 f"group name <{group}> is not a valid system user group"
             )
+        return group
 
     default_user_group = grp.getgrgid(os.getgid()).gr_name
-    default_file_permissions = "770"
+    default_file_permissions = "771"
     
     parser = OceanParser(
         prog="oceanproc",
@@ -233,9 +234,11 @@ def main():
     if args.debug_mode:
         flags.debug = True
         logger.setLevel(logging.DEBUG)
-
-    flags.permissions_group = args.permissions_group
+    
     flags.file_permissions = args.file_permissions
+    flags.permissions_group = args.permissions_group
+    flags.gid = grp.getgrnam(flags.permissions_group).gr_gid
+    flags.uid = os.getuid()
 
     logger.info("Starting oceanproc...")
     logger.info(f"Log will be stored at {log_path}")
@@ -325,7 +328,6 @@ def main():
                 subject=args.subject,
                 session=args.session,
                 layout=bids_layout,
-                # xml_path=xml_data_path,
                 allow_uneven_fmap_groups=args.allow_uneven_fmap_groups,
                 extract_best_fmap=args.extract_best_fmap
             )
@@ -385,7 +387,7 @@ def main():
         )
 
     ##### Create long formatted event files #####
-    if not args.skip_event_files:
+    if not args.skip_event_files and not args.anat_only:
         create_events_and_confounds(
             bids_path=args.bids_path,
             derivs_path=preproc_derivs_path,

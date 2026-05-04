@@ -10,7 +10,7 @@ from bids import BIDSLayout
 import logging
 
 from bids.layout import BIDSFile
-from .utils import exit_program_early, debug_logging, log_linebreak, flags
+from .utils import exit_program_early, debug_logging, log_linebreak, flags, update_permissions
 import nibabel as nib
 import numpy as np
 import shutil
@@ -330,6 +330,13 @@ def extract_best_acqusition(fmap_file: str|BIDSFile, bids_layout: BIDSLayout) ->
     jd["ExtractedVolume"] = int(best_vol + 1)
     with open(best_acq_json, "w") as out_js:
         json.dump(jd, out_js, indent=4)
+
+    for fmap_out_path in [best_acq_fmap, best_acq_json]:
+        update_permissions(
+            permissions=flags.file_permissions,
+            path=fmap_out_path,
+            group=flags.permissions_group,
+        )
 
     return (BIDSFile(best_acq_fmap), BIDSFile(best_acq_json))
     
