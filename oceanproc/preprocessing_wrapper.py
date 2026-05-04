@@ -123,10 +123,11 @@ def run_preprocessing(subject:str,
     success = True
     try:
         run_subprocess(preproc_command, title=title)
-    except RuntimeError as e:
+    except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
         success = False
+
     if not flags.debug:
         clean_up()
 
@@ -393,7 +394,7 @@ def process_data(subject:str,
                 permissions=flags.file_permissions,
                 path=op,
                 recursive=True,
-                group=flags.permission_group
+                group=flags.permissions_group
             )
             
     # update file permisions for working directory files

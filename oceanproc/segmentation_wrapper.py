@@ -76,7 +76,7 @@ def run_bibsnet(subject:str,
     success = True
     try:
         run_subprocess(bibsnet_command, title="BIBSnet")
-    except Exception as e:
+    except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
         success = False
@@ -143,7 +143,7 @@ def segment_anatomical(subject:str,
                 permissions=flags.file_permissions,
                 path=op,
                 recursive=True,
-                group=flags.permission_group
+                group=flags.permissions_group
             )
         
     if not segment_success:
