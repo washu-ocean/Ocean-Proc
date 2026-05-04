@@ -103,7 +103,7 @@ def main():
         epilog="An arguments file can be accepted with @FILEPATH.\nAny additional arguments not listed in the help message will be passed to the preprocessing subprocess.",
         allow_abbrev=False
     )
-    parser.add_argument("--version", action="version", version='%(prog)s v1.2.2')
+    parser.add_argument("--version", action="version", version='%(prog)s v1.3.0')
     session_args = parser.add_argument_group("Session Specific")
     config_args = parser.add_argument_group("Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
     parser.register("type", "Full-Path", lambda p: Path(p).resolve())
