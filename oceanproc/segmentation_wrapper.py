@@ -128,12 +128,13 @@ def segment_anatomical(subject:str,
     paths_to_update = sorted(derivs_path.glob(f"bibsnet/sub-{subject}*"))
     paths_to_update.extend(sorted(work_path.glob(f"*/sub-{subject}*")))
     for out_path in paths_to_update:
-        # update file permissions for segmentation outputs and working files
-        update_permissions(
-            permissions=flags.file_permissions, 
-            path=out_path, 
-            recursive=True,
-            group=flags.permissions_group)
+        if out_path.exists():
+            # update file permissions for segmentation outputs and working files
+            update_permissions(
+                permissions=flags.file_permissions, 
+                path=out_path, 
+                recursive=True,
+                group=flags.permissions_group)
         
     # check other top-level files
     other_paths = [derivs_path/"dataset_description.json"]

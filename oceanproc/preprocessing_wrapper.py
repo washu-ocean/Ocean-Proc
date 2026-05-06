@@ -377,13 +377,14 @@ def process_data(subject:str,
     paths_to_update.extend(sorted(derivs_path.glob(f"sub-{subject}*")))
     paths_to_update.extend(sorted(derivs_path.glob(f"sourcedata/*/sub-{subject}*")))
     for out_path in paths_to_update:
-        # update file permissions for preprocessing outputs
-        update_permissions(
-            permissions=flags.file_permissions, 
-            path=out_path, 
-            recursive=True,
-            group=flags.permissions_group
-        )
+        if out_path.exists():
+            # update file permissions for preprocessing outputs
+            update_permissions(
+                permissions=flags.file_permissions, 
+                path=out_path, 
+                recursive=True,
+                group=flags.permissions_group
+            )
         
     # check other top-level files
     other_paths = [derivs_path/"dataset_description.json", derivs_path/"logs"]
