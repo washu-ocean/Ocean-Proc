@@ -239,10 +239,11 @@ def prepare_subprocess_logging(this_logger,
 
 
 @debug_logging
-def run_subprocess(cmd: str, title: str, log_output=True):
+def run_subprocess(cmd: str, title: str, log_output=True, quiet=False):
     split_cmd = shlex.split(cmd)
     logger.info(f"running '{title}' with the following command: \n{' '.join(split_cmd)}\n")
     prepare_subprocess_logging(logger)
+    ecode = 0
     with Popen(split_cmd, stdout=PIPE, stderr=PIPE) as p:
         while p.poll() == None:
             if log_output:
@@ -251,9 +252,11 @@ def run_subprocess(cmd: str, title: str, log_output=True):
                 for line in p.stderr:
                     logger.info(line.decode("utf-8", "ignore"))
         prepare_subprocess_logging(logger, stop=True)
+        ecode = p.poll()
         p.kill()
-        if (ecode:=p.poll()) != 0:
+        if (ecode != 0) and (not quiet):
             raise RuntimeError(f"process -'{title}'- has ended with a non-zero exit code <{ecode}>.")
+    return ecode
 
 
 def log_linebreak():
@@ -412,8 +415,8 @@ def update_permissions(permissions:str, path:Path, recursive=False, group=None, 
         raise ValueError(f"Did not receive a valid path: <{path}>")
     
     chmod_cmd = f"chmod {'-R' if recursive else ''} {permissions} {path.resolve()}"
-    run_subprocess(cmd=chmod_cmd, title="chmod", log_output=False)
+    run_subprocess(cmd=chmod_cmd, title="chmod", log_output=False, quiet=True)
 
     if group is not None:
         chgrp_cmd = f"chgrp {'-R' if recursive else ''} {group} {path.resolve()}"
-        run_subprocess(cmd=chgrp_cmd, title="chgrp", log_output=False)
+        run_subprocess(cmd=chgrp_cmd, title="chgrp", log_output=False, quiet=True)
