@@ -103,10 +103,9 @@ def main():
         epilog="An arguments file can be accepted with @FILEPATH.\nAny additional arguments not listed in the help message will be passed to the preprocessing subprocess.",
         allow_abbrev=False
     )
-    parser.add_argument("--version", action="version", version='%(prog)s v1.3.0')
+    parser.add_argument("--version", action="version", version='%(prog)s v1.3.1')
     session_args = parser.add_argument_group("Session Specific")
     config_args = parser.add_argument_group("Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
-    parser.register("type", "Full-Path", lambda p: Path(p).resolve())
 
     session_args.add_argument("--subject", "-su", required=True,
                               help="The identifier of the subject to preprocess")
@@ -167,7 +166,7 @@ def main():
     config_args.add_argument("--dscans_path", type=ExistingDir,
                              help="""The path to the directory containing 'dscans' files for inserting dummy scans into bold runs. Must be named exactly as corresponding bold image except with 'dscans' as 
                              the suffix and '.tsv' as the extension. Contents of the file must be a column, titled 'dummy_scan', with ones and zeros. Ones denote which frames should be dummy scans.""")
-    config_args.add_argument("--precomputed_derivatives", "-pd", type="Full-Path", dest="derivatives", nargs="*",
+    config_args.add_argument("--precomputed_derivatives", "-pd", type=ExistingDir, dest="derivatives", nargs="+",
                              help="A list of paths to any BIDS-style precomputed derivatives that should be used in preprocessing. (Ex. /path/to/bibsnet)")
     config_args.add_argument("--work_dir", "-w", type=ExistingDir, required=True,
                              help="The path to the working directory used to store intermediate files")
