@@ -13,6 +13,7 @@ import nibabel as nib
 import json
 import os
 import copy
+import subprocess
 from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,13 @@ def run_preprocessing(subject:str,
         mount_flag = "-B"
     else: 
         cmd_prelude = f"docker run --rm -i -u {flags.uid}:{flags.gid}"
+        import grp
+        mygids = (
+            grp.getgrnam(groupname).gr_gid for groupname in 
+            subprocess.run('groups', capture_output=True).stdout.decode().strip().split()
+        )
+        for mygid in mygids:
+            cmd_prelude += f" --group-add {mygid} "
         mount_flag = "-v"
 
     additional_mount_paths = []
