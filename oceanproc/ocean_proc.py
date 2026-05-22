@@ -103,7 +103,7 @@ def main():
         epilog="An arguments file can be accepted with @FILEPATH.\nAny additional arguments not listed in the help message will be passed to the preprocessing subprocess.",
         allow_abbrev=False
     )
-    parser.add_argument("--version", action="version", version='%(prog)s v1.3.1')
+    parser.add_argument("--version", action="version", version='%(prog)s v1.3.2')
     session_args = parser.add_argument_group("Session Specific")
     config_args = parser.add_argument_group("Configuration Arguments", "These arguments are saved to a file if the '--export_args' option is used")
 
@@ -157,11 +157,11 @@ def main():
                              help="framewise displacement threshold (in mm) to determine outlier framee (Default is 0.9).")
     config_args.add_argument("--skip_bids_validation", action=argparse.BooleanOptionalAction,
                              help="Specifies skipping BIDS validation (only enabled for fMRIprep step)")
-    config_args.add_argument("--fs_subjects_dir", "-fs", type=ExistingDir,
+    config_args.add_argument("--fs_subjects_dir", "--fs-subjects-dir", "-fs", type=ExistingDir, dest="fs_subjects_dir",
                              help="The path to the directory that contains previous FreeSurfer outputs/derivatives to use for fMRIPrep. If empty, this is the path where new FreeSurfer outputs will be stored.")
     config_args.add_argument("--allow_uneven_fmap_groups", action="store_true",
                              help="Flag to allow for automated fieldmap pairing when there's more AP- than PA-encoded fieldmaps, or vice versa (will still error out if at least one of each is not present.)")
-    config_args.add_argument("--extract_best_fmap", action="store_true",
+    config_args.add_argument("--extract_best_fmap", action=argparse.BooleanOptionalAction,
                              help="Flag to specify that the lowest variance fieldmap volume should be extracted from each fieldmap, and used for distortion correction (opposed to all volumes being used)")
     config_args.add_argument("--dscans_path", type=ExistingDir,
                              help="""The path to the directory containing 'dscans' files for inserting dummy scans into bold runs. Must be named exactly as corresponding bold image except with 'dscans' as 
@@ -170,7 +170,7 @@ def main():
                              help="A list of paths to any BIDS-style precomputed derivatives that should be used in preprocessing. (Ex. /path/to/bibsnet)")
     config_args.add_argument("--work_dir", "-w", type=ExistingDir, required=True,
                              help="The path to the working directory used to store intermediate files")
-    config_args.add_argument("--fs_license", "-l", type=ExistingFile, required=True,
+    config_args.add_argument("--fs_license", "--fs-license-file", "-l", type=ExistingFile, dest="fs_license", required=True,
                              help="The path to the license file for the local installation of FreeSurfer")
     config_args.add_argument("--image_version", "-iv", default=None,
                              help=f"""The version of fmriprep to use; It is reccomended that an entire study use the same version. 
