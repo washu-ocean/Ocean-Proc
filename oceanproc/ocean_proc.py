@@ -159,6 +159,8 @@ def main():
                              help="Specifies skipping BIDS validation (only enabled for fMRIprep step)")
     config_args.add_argument("--fs_subjects_dir", "--fs-subjects-dir", "-fs", type=ExistingDir, dest="fs_subjects_dir",
                              help="The path to the directory that contains previous FreeSurfer outputs/derivatives to use for fMRIPrep. If empty, this is the path where new FreeSurfer outputs will be stored.")
+    config_args.add_argument("--topup_config", "--topup-config", "-tc", type=ExistingFile, dest="topup_config",
+                             help="Path to a TOPUP config file.")
     config_args.add_argument("--allow_uneven_fmap_groups", action="store_true",
                              help="Flag to allow for automated fieldmap pairing when there's more AP- than PA-encoded fieldmaps, or vice versa (will still error out if at least one of each is not present.)")
     config_args.add_argument("--extract_best_fmap", action=argparse.BooleanOptionalAction,

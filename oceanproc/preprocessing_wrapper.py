@@ -32,8 +32,12 @@ infant_defaults = SimpleNamespace(
 )
 
 # Preprocessing arguments that need to have their paths binded when running docker
-mount_opts = {"fs_subjects_dir",
-                  "derivatives"}
+mount_opts = {
+    "fs_subjects_dir",
+    "derivatives",
+    "topup_config"
+}
+
 
 @debug_logging
 def run_preprocessing(subject:str,
@@ -69,7 +73,7 @@ def run_preprocessing(subject:str,
     :raise RuntimeError: If preprocessing throws an error, or exits with a non-zero exit code.
     """
     def clean_up(): return shutil.rmtree(work_path) if remove_work_folder else None
-   
+
     log_linebreak()
     logger.info(f"####### Starting {title} #######\n")
     if not bids_path.exists():
@@ -81,15 +85,15 @@ def run_preprocessing(subject:str,
     bids_mount = "/data"
     derivs_mount = "/out"
     work_mount = "/work"
-    
+
     if flags.apptainer:
         cmd_prelude = f"apptainer run --nv --cleanenv --no-mount cwd --pwd {work_mount}"
         mount_flag = "-B"
-    else: 
+    else:
         cmd_prelude = f"docker run --rm -i -u {flags.uid}:{flags.gid}"
         import grp
         mygids = (
-            grp.getgrnam(groupname).gr_gid for groupname in 
+            grp.getgrnam(groupname).gr_gid for groupname in
             subprocess.run('groups', capture_output=True).stdout.decode().strip().split()
         )
         for mygid in mygids:
@@ -126,7 +130,7 @@ def run_preprocessing(subject:str,
                             -w {work_mount} --verbose
                             {additional_mount_args}
                             {option_chain}"""
-    
+
     success = True
     try:
         run_subprocess(preproc_command, title=title)
@@ -139,6 +143,7 @@ def run_preprocessing(subject:str,
         clean_up()
 
     return success
+
 
 @debug_logging
 def add_fd_plot_to_report(subject:str,
@@ -230,7 +235,7 @@ def add_fd_plot_to_report(subject:str,
                 # Add the new elements into the file
                 logger.debug(f" inserting the new html elements into the {title} report")
                 confounds_plot_div.insert_after(fd_plot_div)
-            else: 
+            else:
                 confounds_plot_reference_div = confounds_plot_div.find_next_sibling("div", class_="elem-filename")
                 fd_plot_reference_div = copy.copy(confounds_plot_reference_div)
                 fd_plot_reference_div.a["href"] = "./" + rel_path
@@ -252,9 +257,9 @@ def insert_dummy_frames(subject:str,
                         session:str,
                         dscan_dir:Path,
                         bids_layout:BIDSLayout):
-    
+
     dscans_suffix = "dscans"
-    dscans_path_pattern = "sub-{subject}[/ses-{session}]/{datatype<func|meg|beh>|func}/sub-{subject}[_ses-{session}]_task-{task}[_acq-{acquisition}][_rec-{reconstruction}][_run-{run}][_echo-{echo}][_recording-{recording}]_{suffix<"+dscans_suffix+">}{extension<.tsv|.json>|.tsv}"
+    dscans_path_pattern = "sub-{subject}[/ses-{session}]/{datatype<func|meg|beh>|func}/sub-{subject}[_ses-{session}]_task-{task}[_acq-{acquisition}][_rec-{reconstruction}][_run-{run}][_echo-{echo}][_recording-{recording}]_{suffix<" + dscans_suffix + ">}{extension<.tsv|.json>|.tsv}"
 
     log_linebreak()
     logger.info(f"####### Inserting Dummy Scans #######\n")
@@ -306,27 +311,27 @@ def insert_dummy_frames(subject:str,
         frame_list = []
         dscans_index = 0
         for f in range(num_bold_frames):
-            copy_dex = f-1 if f > 0 else f
+            copy_dex = f - 1 if f > 0 else f
             while dscans_list[dscans_index] != 0:
                 frame_list.append(bold_data[:,:,:,copy_dex])
                 dscans_index += 1
             frame_list.append(bold_data[:,:,:,f])
             dscans_index += 1
             # check if end of run needs to be extended
-            if (f == num_bold_frames-1) and (dscans_index < len(dscans_list)):
+            if (f == num_bold_frames - 1) and (dscans_index < len(dscans_list)):
                 while dscans_index < len(dscans_list):
                     frame_list.append(bold_data[:,:,:,f])
                     dscans_index += 1
 
         if len(frame_list) != len(dscans_list):
             exit_program_early(f"Something went wrong when creating dummy scans, lengths do not match. bold frames: {len(frame_list)}, dscan length: {len(dscans_list)}")
-        
+
         # save new image
         extended_bold_data = np.stack(frame_list, axis=3)
         extended_bold_img = bold_img.__class__(extended_bold_data, header=bold_img.header, affine=bold_img.affine)
         logger.info(f"  saving extended bold image")
         nib.save(extended_bold_img, bfile.path)
-    
+
 
 @debug_logging
 def process_data(subject:str,
@@ -364,23 +369,23 @@ def process_data(subject:str,
     preproc_title = "NiBabies" if flags.infant else "fMRIPrep"
 
     preproc_success = run_preprocessing(subject=subject,
-                      session=session if flags.infant else None,
-                      bids_path=bids_path,
-                      derivs_path=derivs_path,
-                      work_path=work_path,
-                      license_file=license_file,
-                      image_name=image_name,
-                      title=preproc_title,
-                      option_chain=option_chain,
-                      additional_mounts=additional_mounts,
-                      remove_work_folder=remove_work_folder)
-    
+                                        session=session if flags.infant else None,
+                                        bids_path=bids_path,
+                                        derivs_path=derivs_path,
+                                        work_path=work_path,
+                                        license_file=license_file,
+                                        image_name=image_name,
+                                        title=preproc_title,
+                                        option_chain=option_chain,
+                                        additional_mounts=additional_mounts,
+                                        remove_work_folder=remove_work_folder)
+
     if preproc_success:
         add_fd_plot_to_report(subject=subject,
-                            session=session,
-                            derivs_path=derivs_path,
-                            title=preproc_title)
-    
+                              session=session,
+                              derivs_path=derivs_path,
+                              title=preproc_title)
+
     paths_to_update = []
     paths_to_update.extend(sorted(derivs_path.glob(f"sub-{subject}*")))
     paths_to_update.extend(sorted(derivs_path.glob(f"sourcedata/*/sub-{subject}*")))
@@ -388,14 +393,14 @@ def process_data(subject:str,
         if out_path.exists():
             # update file permissions for preprocessing outputs
             update_permissions(
-                permissions=flags.file_permissions, 
-                path=out_path, 
+                permissions=flags.file_permissions,
+                path=out_path,
                 recursive=True,
                 group=flags.permissions_group
             )
-        
+
     # check other top-level files
-    other_paths = [derivs_path/"dataset_description.json", derivs_path/"logs"]
+    other_paths = [derivs_path / "dataset_description.json", derivs_path / "logs"]
     for op in other_paths:
         if op.exists() and (op.stat().st_uid == flags.uid):
             update_permissions(
@@ -404,15 +409,15 @@ def process_data(subject:str,
                 recursive=True,
                 group=flags.permissions_group
             )
-            
+
     # update file permisions for working directory files
     update_permissions(
-        permissions=flags.file_permissions, 
-        path=work_path, 
+        permissions=flags.file_permissions,
+        path=work_path,
         recursive=True,
         group=flags.permissions_group,
         quiet=True
     )
-    
+
     if not preproc_success:
         exit_program_early(f"Program '{preproc_title}' has run into an error.")
