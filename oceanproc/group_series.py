@@ -50,7 +50,7 @@ def get_func_from_bids(bids_layout: BIDSLayout,
                        session:str,
                        groupings: list[dict[str:set]]):
 
-    func_files = bids_layout.get(subject=subject, session=session, suffix="bold", datatype="func", extension="nii.gz")
+    func_files = bids_layout.get(subject=subject, session=session, suffix="bold", datatype="func", extension=["nii.gz","nii"])
     if len(func_files) == 0:
         exit_program_early("Could not find any functional BOLD files for this subject and session.")
 
