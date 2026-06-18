@@ -298,7 +298,7 @@ def main():
     ignore_list = ["tmp_dcm2bids"]
     if (bids_path / ".bidsignore").is_file():
         with open(bids_path / ".bidsignore", "r") as f:
-            ignore_list.extend(f.readlines())
+            ignore_list.extend([l.strip() for l in f.readlines()])
     ignore_list = list(set(ignore_list))
     other_sub_paths = [
       p.name for p in bids_path.glob("sub-*") 
