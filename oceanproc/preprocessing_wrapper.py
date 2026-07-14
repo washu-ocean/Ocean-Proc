@@ -74,6 +74,14 @@ def run_preprocessing(subject:str,
     """
     def clean_up(): return shutil.rmtree(work_path) if remove_work_folder else None
 
+    def make_mount_path(path_to_mount:str|Path, mount_key:int):
+        mount_path = f"/deriv{mount_key}"
+        path_to_mount = Path(path_to_mount)
+        if path_to_mount.is_file():
+            suffix = "".join(path_to_mount.suffixes)
+            mount_path += suffix
+        return mount_path
+
     log_linebreak()
     logger.info(f"####### Starting {title} #######\n")
     if not bids_path.exists():
@@ -107,12 +115,14 @@ def run_preprocessing(subject:str,
         arg_vals = [k]
         if isinstance(v, list):
             for sub_v in v:
-                additional_mount_paths.append(f"{mount_flag} {sub_v.resolve()}:/deriv{mount_dex}")
-                arg_vals.append(f"/deriv{mount_dex}")
+                mount_path = make_mount_path(sub_v, mount_dex)
+                additional_mount_paths.append(f"{mount_flag} {sub_v.resolve()}:{mount_path}")
+                arg_vals.append(mount_path)
                 mount_dex += 1
         else:
-            additional_mount_paths.append(f"{mount_flag} {v.resolve()}:/deriv{mount_dex}")
-            arg_vals.append(f"/deriv{mount_dex}")
+            mount_path = make_mount_path(v, mount_dex)
+            additional_mount_paths.append(f"{mount_flag} {v.resolve()}:{mount_path}")
+            arg_vals.append(mount_path)
             mount_dex += 1
         additional_mount_args.append(" ".join(arg_vals))
     additional_mount_paths = " ".join(additional_mount_paths)
