@@ -94,7 +94,7 @@ def main():
 
     default_user_group = grp.getgrgid(os.getgid()).gr_name
     default_file_permissions = "771"
-    
+
     parser = OceanParser(
         prog="oceanproc",
         description="Ocean Labs adult MRI preprocessing",
@@ -141,7 +141,7 @@ def main():
     config_args.add_argument("--derivs_path", "-d", type=ExistingDir, required=True,
                              help="The path to the BIDS formated derivatives directory for this subject")
     config_args.add_argument("--derivs_subfolder", "-ds", default=None,
-                             help=f"""The subfolder in the derivatives directory where bids style outputs should be stored. 
+                             help=f"""The subfolder in the derivatives directory where bids style outputs should be stored.
                                   The default is {adult_defaults.derivs_subfolder} or {infant_defaults.derivs_subfolder} if the '--infant' flag is set.""")
     config_args.add_argument("--bids_config", "-c", type=ExistingFile, required=True,
                              help="The path to the dcm2bids config file to use for this subject and session")
@@ -174,8 +174,10 @@ def main():
                              help="The path to the working directory used to store intermediate files")
     config_args.add_argument("--fs_license", "--fs-license-file", "-l", type=ExistingFile, dest="fs_license", required=True,
                              help="The path to the license file for the local installation of FreeSurfer")
+    config_args.add_argument("--keep_part_files", action=argparse.BooleanOptionalAction,
+                             help="Don't automatically remove 'part-mag' and 'part-phase' files after running dcm2bids.")
     config_args.add_argument("--image_version", "-iv", default=None,
-                             help=f"""The version of fmriprep to use; It is reccomended that an entire study use the same version. 
+                             help=f"""The version of fmriprep to use; It is reccomended that an entire study use the same version.
                                   The default is {adult_defaults.image_version} or {infant_defaults.image_version} if the '--infant' flag is set.""")
     config_args.add_argument("--infant", "-I", action=argparse.BooleanOptionalAction,
                              help="Flag to specify that NiBabies should be used instead of fMRIPrep")
@@ -235,7 +237,7 @@ def main():
     if args.debug_mode:
         flags.debug = True
         logger.setLevel(logging.DEBUG)
-    
+
     flags.file_permissions = args.file_permissions
     flags.permissions_group = args.permissions_group
     flags.gid = grp.getgrnam(flags.permissions_group).gr_gid
@@ -254,7 +256,6 @@ def main():
         except Exception as e:
             logger.exception(e)
             exit_program_early(e)
-
 
     # log the input arguments
     for k,v in (dict(args._get_kwargs())).items():
@@ -286,14 +287,15 @@ def main():
                 skip_validate=args.skip_bids_validation,
                 skip_prompt=index > 0,
                 session_index=index,
-                keep_all_niftis=args.keep_all_niftis
+                keep_all_niftis=args.keep_all_niftis,
+                keep_part_files=args.keep_part_files
             )
             if index > 0:
                 extend_session(subject=args.subject,
                                session=args.session,
                                tmp_dir=bids_path,
                                bids_dir=args.bids_path)
-                
+
     # create a bids layout object
     ignore_list = ["tmp_dcm2bids"]
     if (bids_path / ".bidsignore").is_file():
@@ -301,8 +303,8 @@ def main():
             ignore_list.extend([l.strip() for l in f.readlines()])
     ignore_list = list(set(ignore_list))
     other_sub_paths = [
-      p.name for p in bids_path.glob("sub-*") 
-      if not f"sub-{args.subject}".startswith(p.name) and p.is_dir()  # 'startswith' to account for pybids regexifying after the end of subject name
+        p.name for p in bids_path.glob("sub-*")
+        if not f"sub-{args.subject}".startswith(p.name) and p.is_dir()  # 'startswith' to account for pybids regexifying after the end of subject name
     ]
     ignore_list.extend(other_sub_paths)
     bids_layout = BIDSLayout(args.bids_path, validate=False, indexer=BIDSLayoutIndexer(ignore=ignore_list, validate=False))
@@ -354,7 +356,6 @@ def main():
         if not bibsnet_path.exists():
             exit_program_early(f"Cannot find the outputs for BIBSnet at the path {bibsnet_path}")
 
-
     ##### Insert dummy scans in requested #####
     if args.dscans_path:
         insert_dummy_frames(
@@ -363,7 +364,6 @@ def main():
             dscan_dir=args.dscans_path,
             bids_layout=bids_layout
         )
-
 
     ##### Run fMRIPrep or NiBabies #####
     all_opts = dict(args._get_kwargs())

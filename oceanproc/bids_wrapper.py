@@ -74,7 +74,8 @@ def run_dcm2bids(subject:str,
                  bids_output_dir:Path,
                  config_file:Path,
                  nordic_config:Path = None,
-                 skip_validate:bool = False):
+                 skip_validate:bool = False,
+                 keep_part_files: bool = False):
     """
     Run dcm2bids with a given set of parameters.
 
@@ -141,6 +142,7 @@ def run_dcm2bids(subject:str,
 
     return True
 
+
 @debug_logging
 def run_dcm2niix(source_dir:Path,
                  tmp_nifti_dir:Path):
@@ -178,7 +180,7 @@ def run_dcm2niix(source_dir:Path,
         prepare_subprocess_logging(logger, stop=True)
         logger.exception(e, stack_info=True)
         return False
-    
+
     return True
 
 
@@ -271,7 +273,7 @@ def extend_session(subject:str,
             continue
         run_nums = [f.entities['run'] for f in similar_files if 'run' in f.entities]
         max_bids_run = 1 if len(run_nums) == 0 else int(max(run_nums))
-        tmp_ent['run'] = f"{(max_bids_run+tmp_run_num):02d}"
+        tmp_ent['run'] = f"{(max_bids_run + tmp_run_num):02d}"
         tmp_new_path = bids_layout.build_path(tmp_ent)
         logger.info(f"moving file: {tmp_file.path} to: {tmp_new_path}")
         shutil.move(tmp_file.path, tmp_new_path)
@@ -297,7 +299,8 @@ def dicom_to_bids(subject:str,
                   skip_validate:bool = False,
                   skip_prompt:bool = False,
                   session_index:int = 0,
-                  keep_all_niftis:bool = False):
+                  keep_all_niftis:bool = False,
+                  keep_part_files:bool = False):
     """
     Facilitates the conversion of DICOM data into NIFTI data in BIDS format, and the removal of data marked 'unusable'.
 
@@ -350,7 +353,7 @@ def dicom_to_bids(subject:str,
         nii_success = run_dcm2niix(source_dir=source_dir,
                                    tmp_nifti_dir=tmp_nifti_path)
     else:
-        # copy current niftis to tmp_nifti_path 
+        # copy current niftis to tmp_nifti_path
         logger.info(f"copying the source NIFTI files to tmp directory, {tmp_nifti_path}")
         shutil.copytree(source_dir.resolve(), tmp_nifti_path.resolve())
 
@@ -361,7 +364,7 @@ def dicom_to_bids(subject:str,
         recursive=True,
         group=flags.permissions_group
     )
-    
+
     if not nii_success:
         exit_program_early(f"Problem running 'dcm2niix'")
 
@@ -408,13 +411,14 @@ def dicom_to_bids(subject:str,
                                session_number=session_index)
 
     dcm2bids_success = run_dcm2bids(subject=subject,
-                 session=session,
-                 nifti_dir=tmp_nifti_path,
-                 bids_output_dir=bids_dir,
-                 config_file=bids_config,
-                 nordic_config=nordic_config,
-                 skip_validate=skip_validate)
-    
+                                    session=session,
+                                    nifti_dir=tmp_nifti_path,
+                                    bids_output_dir=bids_dir,
+                                    config_file=bids_config,
+                                    nordic_config=nordic_config,
+                                    skip_validate=skip_validate,
+                                    keep_part_files=keep_part_files)
+
     update_permissions(
         permissions=flags.file_permissions,
         path=sub_ses_bids_dir,
