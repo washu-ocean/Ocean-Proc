@@ -129,11 +129,12 @@ def run_dcm2bids(subject:str,
             run_subprocess(nordic_run_command, title=title)
 
             # Clean up NORDIC files
-            separate_nordic_files = bids_output_dir.glob(f"sub-{subject}/ses-{session}/func/*_part-*")
-            logger.debug("removing the old nordic files that are not needed after mag-phase combination :")
-            for f in separate_nordic_files:
-                logger.debug(f"deleting file: {f}")
-                os.remove(f)
+            if not keep_part_files:
+                separate_nordic_files = bids_output_dir.glob(f"sub-{subject}/ses-{session}/func/*_part-*")
+                logger.debug("removing the old nordic files that are not needed after mag-phase combination :")
+                for f in separate_nordic_files:
+                    logger.debug(f"deleting file: {f}")
+                    os.remove(f)
 
     except (Exception, KeyboardInterrupt) as e:
         prepare_subprocess_logging(logger, stop=True)
