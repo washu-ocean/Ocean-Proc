@@ -2,7 +2,7 @@ import sys
 import logging
 from pathlib import Path
 import json
-from subprocess import Popen, PIPE
+from subprocess import DEVNULL, STDOUT, Popen, PIPE
 import shlex
 from types import SimpleNamespace
 import nibabel as nib
@@ -243,19 +243,26 @@ def run_subprocess(cmd: str, title: str, log_output=True, quiet=False):
     split_cmd = shlex.split(cmd)
     logger.info(f"running '{title}' with the following command: \n{' '.join(split_cmd)}\n")
     prepare_subprocess_logging(logger)
-    ecode = 0
-    with Popen(split_cmd, stdout=PIPE, stderr=PIPE) as p:
-        while p.poll() == None:
-            if log_output:
-                for line in p.stdout:
-                    logger.info(line.decode("utf-8", "ignore"))
-                for line in p.stderr:
-                    logger.info(line.decode("utf-8", "ignore"))
+    ecode=0
+    try:
+        with Popen(
+            split_cmd, 
+            stdin=DEVNULL, 
+            stdout=PIPE, 
+            stderr=STDOUT, 
+            text=True, 
+            errors="ignore"
+        ) as p:
+            for line in p.stdout:
+                if log_output:
+                    logger.info(line)
+        ecode = p.returncode
+    finally:
         prepare_subprocess_logging(logger, stop=True)
-        ecode = p.poll()
-        p.kill()
-        if (ecode != 0) and (not quiet):
-            raise RuntimeError(f"process -'{title}'- has ended with a non-zero exit code <{ecode}>.")
+
+    if (ecode != 0) and (not quiet):
+        raise RuntimeError(f"process -'{title}'- has ended with a non-zero exit code <{ecode}>.")
+    
     return ecode
 
 
